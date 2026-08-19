@@ -1,15 +1,23 @@
+/* RT Trainer — a deliberately single-theme dark "avionics panel" treatment.
+   Every colour is painted explicitly so the page holds on any host ground. */
+
 :root {
-  --bg: #0b1220;
-  --panel: #121b2e;
-  --panel-border: #23324d;
-  --text: #e7edf7;
-  --muted: #93a2ba;
-  --accent: #4fd1c5;
-  --accent-dark: #2c9c92;
-  --good: #3ecf8e;
-  --ok: #e0b03a;
-  --bad: #e06a5f;
+  --bg: #0a1018;
+  --panel: #111b28;
+  --panel-2: #16222f;
+  --line: #223244;
+  --text: #e4ecf5;
+  --muted: #8ba0b8;
+  --dim: #5d738c;
+
+  --accent: #4fd8c4;
+  --accent-dim: #2b8f83;
+  --amber: #e8b23f;
+  --good: #48d69a;
+  --bad: #e8705f;
+
   --radius: 10px;
+  --mono: "Cascadia Code", "SFMono-Regular", ui-monospace, Consolas, monospace;
 }
 
 * {
@@ -24,9 +32,9 @@ body {
 }
 
 .app {
-  max-width: 880px;
+  max-width: 940px;
   margin: 0 auto;
-  padding: 24px 16px 64px;
+  padding: 24px 16px 72px;
 }
 
 .app-header h1 {
@@ -42,9 +50,9 @@ body {
 
 .tabs {
   display: flex;
-  gap: 8px;
+  gap: 4px;
   margin: 20px 0;
-  border-bottom: 1px solid var(--panel-border);
+  border-bottom: 1px solid var(--line);
 }
 
 .tabs button {
@@ -57,9 +65,18 @@ body {
   border-bottom: 2px solid transparent;
 }
 
+.tabs button:hover {
+  color: var(--text);
+}
+
 .tabs button.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+
+:where(button, select, input, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .mode-panel {
@@ -79,7 +96,7 @@ select,
 input[type="search"],
 textarea {
   background: var(--panel);
-  border: 1px solid var(--panel-border);
+  border: 1px solid var(--line);
   color: var(--text);
   border-radius: 8px;
   padding: 8px 10px;
@@ -89,14 +106,69 @@ textarea {
 
 input[type="search"] {
   flex: 1;
-  min-width: 160px;
+  min-width: 180px;
 }
 
-.streak {
+.progress-count {
   color: var(--muted);
   margin-left: auto;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
 }
+
+.progress-track {
+  height: 3px;
+  background: var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+
+/* ---------------------------------------------------------------- phase groups */
+
+.phase-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.phase-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.phase-step {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--accent-dim);
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.phase-heading h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.phase-heading p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* ----------------------------------------------------------------------- cards */
 
 .card-list {
   display: flex;
@@ -106,7 +178,7 @@ input[type="search"] {
 
 .phrase-card {
   background: var(--panel);
-  border: 1px solid var(--panel-border);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 16px 18px;
 }
@@ -115,7 +187,8 @@ input[type="search"] {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
 }
 
 .phrase-card h3 {
@@ -126,23 +199,41 @@ input[type="search"] {
 .chip {
   font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 3px 8px;
+  letter-spacing: 0.05em;
+  padding: 3px 9px;
   border-radius: 999px;
-  background: rgba(79, 209, 197, 0.15);
+  background: rgba(79, 216, 196, 0.14);
   color: var(--accent);
   white-space: nowrap;
 }
 
 .situation {
-  color: var(--text);
-  line-height: 1.5;
-  margin: 6px 0 12px;
+  line-height: 1.55;
+  margin: 0 0 12px;
+}
+
+.ref-body,
+.scenario-body {
+  display: grid;
+  grid-template-columns: 250px 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.scenario-body {
+  margin-bottom: 14px;
+}
+
+@media (max-width: 700px) {
+  .ref-body,
+  .scenario-body {
+    grid-template-columns: 1fr;
+  }
 }
 
 .model-call {
-  background: rgba(79, 209, 197, 0.08);
-  border: 1px dashed var(--accent-dark);
+  background: rgba(79, 216, 196, 0.07);
+  border: 1px dashed var(--accent-dim);
   border-radius: 8px;
   padding: 10px 12px;
   display: flex;
@@ -152,28 +243,30 @@ input[type="search"] {
 }
 
 .model-call .label {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   text-transform: uppercase;
   color: var(--muted);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   width: 100%;
 }
 
 .model-call p {
   margin: 0;
-  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
-  font-size: 0.95rem;
+  font-family: var(--mono);
+  font-size: 0.92rem;
+  line-height: 1.5;
 }
 
 .notes {
   color: var(--muted);
   font-size: 0.85rem;
+  line-height: 1.5;
   margin: 10px 0 0;
 }
 
 .phrase-card footer {
   margin-top: 10px;
-  color: var(--muted);
+  color: var(--dim);
   font-size: 0.75rem;
 }
 
@@ -181,20 +274,149 @@ input[type="search"] {
   color: var(--muted);
 }
 
-.ghost-btn {
-  background: none;
-  border: 1px solid var(--panel-border);
-  color: var(--text);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 0.8rem;
-  cursor: pointer;
+/* --------------------------------------------------------------------- diagram */
+
+.diagram {
+  margin: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
 }
 
-.ghost-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+/* Square viewBox — let width drive, so the drawing never letterboxes. */
+.diagram svg {
+  display: block;
+  width: 100%;
+  height: auto;
 }
+
+.scenario-body .situation {
+  margin: 0;
+}
+
+.dg-circuit {
+  fill: none;
+  stroke: #2f4459;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 5;
+}
+
+.dg-runway {
+  fill: #2a3a4c;
+  stroke: #43596f;
+  stroke-width: 1;
+}
+
+.dg-centreline {
+  stroke: #7b93a9;
+  stroke-width: 1.4;
+  stroke-dasharray: 9 9;
+}
+
+.dg-apron {
+  fill: #1c2938;
+  stroke: #35485c;
+  stroke-width: 1;
+}
+
+.dg-taxiway {
+  stroke: #35485c;
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+
+.dg-leg,
+.dg-field {
+  fill: var(--dim);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  font-family: var(--mono);
+}
+
+.dg-field {
+  font-size: 8px;
+}
+
+.dg-radial {
+  stroke: var(--accent-dim);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 4;
+}
+
+.dg-ring {
+  fill: none;
+  stroke: #2f4459;
+  stroke-width: 1.2;
+  stroke-dasharray: 3 6;
+}
+
+.dg-compass {
+  fill: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.dg-distance {
+  fill: var(--accent);
+  font-size: 10px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.dg-plane {
+  stroke-width: 1;
+}
+
+.dg-plane.airborne {
+  fill: var(--accent);
+  stroke: #0a1018;
+}
+
+.dg-plane.on-ground {
+  fill: var(--amber);
+  stroke: #0a1018;
+}
+
+.dg-pulse {
+  fill: rgba(79, 216, 196, 0.16);
+  animation: pulse 2.4s ease-out infinite;
+  /* Anchor to the circle's own box, not the SVG viewBox (the SVG default). */
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes pulse {
+  0% { transform: scale(0.55); opacity: 0.9; }
+  70% { transform: scale(1.25); opacity: 0; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dg-pulse { animation: none; opacity: 0.5; }
+  .progress-fill { transition: none; }
+}
+
+.diagram figcaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 4px 2px;
+  font-size: 0.75rem;
+}
+
+.dg-caption-pos {
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.dg-caption-field {
+  color: var(--dim);
+}
+
+/* ------------------------------------------------------------------ trainer form */
 
 form label {
   display: block;
@@ -206,13 +428,15 @@ form label {
 textarea {
   width: 100%;
   resize: vertical;
-  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-family: var(--mono);
+  line-height: 1.5;
 }
 
 .actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   margin-top: 10px;
+  flex-wrap: wrap;
 }
 
 button[type="submit"] {
@@ -226,59 +450,157 @@ button[type="submit"] {
 }
 
 button[type="submit"]:hover {
-  background: #63e0d4;
+  background: #67e6d3;
 }
+
+.ghost-btn {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.ghost-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.mic-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 1px solid var(--accent-dim);
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.mic-btn:hover {
+  background: rgba(79, 216, 196, 0.1);
+}
+
+.mic-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+}
+
+.mic-btn.listening {
+  border-color: var(--bad);
+  color: var(--bad);
+  background: rgba(232, 112, 95, 0.1);
+}
+
+.mic-btn.listening .mic-dot {
+  background: var(--bad);
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mic-btn.listening .mic-dot { animation: none; }
+}
+
+.mic-hint {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  color: var(--accent);
+}
+
+.mic-hint.subtle {
+  color: var(--dim);
+}
+
+.mic-error {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  color: var(--bad);
+}
+
+/* ----------------------------------------------------------------------- result */
 
 .result {
   margin-top: 16px;
-  border-top: 1px solid var(--panel-border);
+  border-top: 1px solid var(--line);
   padding-top: 14px;
 }
 
 .result .score {
   font-weight: 600;
-  margin: 0 0 6px;
-}
-
-.result.good .score {
-  color: var(--good);
-}
-
-.result.ok .score {
-  color: var(--ok);
-}
-
-.result.bad .score {
-  color: var(--bad);
-}
-
-.result .missing {
-  color: var(--muted);
-  font-size: 0.85rem;
   margin: 0 0 10px;
+  font-variant-numeric: tabular-nums;
 }
+
+.result.good .score { color: var(--good); }
+.result.ok .score { color: var(--amber); }
+.result.bad .score { color: var(--bad); }
+
+.element-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.element-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-family: var(--mono);
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+}
+
+.element-list li.hit {
+  color: var(--good);
+  border-color: rgba(72, 214, 154, 0.4);
+  background: rgba(72, 214, 154, 0.08);
+}
+
+.element-list li.miss {
+  color: var(--bad);
+  border-color: rgba(232, 112, 95, 0.4);
+  background: rgba(232, 112, 95, 0.08);
+}
+
+/* ---------------------------------------------------------------------- sources */
 
 .sources-panel .disclaimer {
-  background: rgba(224, 176, 58, 0.1);
-  border: 1px solid rgba(224, 176, 58, 0.4);
+  background: rgba(232, 178, 63, 0.1);
+  border: 1px solid rgba(232, 178, 63, 0.4);
   border-radius: var(--radius);
   padding: 14px 16px;
 }
 
 .sources-panel .disclaimer strong {
-  color: var(--ok);
+  color: var(--amber);
 }
 
 .sources-panel .disclaimer p {
-  color: var(--text);
-  line-height: 1.5;
+  line-height: 1.6;
   margin: 8px 0 0;
   white-space: pre-line;
+  max-width: 68ch;
 }
 
 .source-list {
   list-style: none;
   padding: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -286,7 +608,7 @@ button[type="submit"]:hover {
 
 .source-list li {
   background: var(--panel);
-  border: 1px solid var(--panel-border);
+  border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 14px;
 }

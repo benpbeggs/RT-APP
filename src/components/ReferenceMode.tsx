@@ -1,69 +1,89 @@
 import { useMemo, useState } from "react";
-import { CATEGORY_LABELS, SCENARIOS, type PhraseCategory } from "../data/phraseology";
-import { renderScenario } from "../lib/scenario";
+import { PHASES } from "../data/phraseology";
+import { generateValues, renderScenario, scenariosInScope } from "../lib/scenario";
 import { speak, speechSupported } from "../lib/speech";
-
-const ALL: PhraseCategory | "all" = "all";
+import { AircraftDiagram } from "./AircraftDiagram";
 
 export function ReferenceMode() {
-  const [category, setCategory] = useState<PhraseCategory | "all">(ALL);
   const [query, setQuery] = useState("");
+  // One consistent example aircraft across the whole reference, so the calls
+  // read as a single flight rather than a jumble of unrelated registrations.
+  const values = useMemo(() => generateValues(), []);
 
-  const rendered = useMemo(() => SCENARIOS.map(renderScenario), []);
+  const grouped = useMemo(
+    () =>
+      PHASES.map((phase) => ({
+        phase,
+        items: scenariosInScope(phase.id).map((t) => renderScenario(t, values)),
+      })),
+    [values],
+  );
 
-  const filtered = rendered.filter((r) => {
-    const matchesCategory = category === "all" || r.template.category === category;
-    const q = query.trim().toLowerCase();
-    const matchesQuery =
-      q === "" ||
-      r.template.title.toLowerCase().includes(q) ||
-      r.modelCall.toLowerCase().includes(q) ||
-      r.situation.toLowerCase().includes(q);
-    return matchesCategory && matchesQuery;
-  });
+  const q = query.trim().toLowerCase();
+  const filtered = grouped
+    .map(({ phase, items }) => ({
+      phase,
+      items: items.filter(
+        (r) =>
+          q === "" ||
+          r.template.title.toLowerCase().includes(q) ||
+          r.modelCall.toLowerCase().includes(q) ||
+          r.situation.toLowerCase().includes(q),
+      ),
+    }))
+    .filter((g) => g.items.length > 0);
 
   return (
     <div className="mode-panel">
       <div className="filters">
-        <select value={category} onChange={(e) => setCategory(e.target.value as PhraseCategory | "all")}>
-          <option value="all">All categories</option>
-          {(Object.keys(CATEGORY_LABELS) as PhraseCategory[]).map((c) => (
-            <option key={c} value={c}>
-              {CATEGORY_LABELS[c]}
-            </option>
-          ))}
-        </select>
         <input
           type="search"
-          placeholder="Search phrases…"
+          placeholder="Search calls…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
 
-      <div className="card-list">
-        {filtered.map((r) => (
-          <article className="phrase-card" key={r.template.id}>
-            <header>
-              <span className={`chip chip-${r.template.category}`}>{CATEGORY_LABELS[r.template.category]}</span>
-              <h3>{r.template.title}</h3>
-            </header>
-            <p className="situation">{r.situation}</p>
-            <div className="model-call">
-              <span className="label">Model call</span>
-              <p>“{r.modelCall}”</p>
-              {speechSupported() && (
-                <button className="ghost-btn" onClick={() => speak(r.modelCall)}>
-                  ▶ Listen
-                </button>
-              )}
+      {filtered.map(({ phase, items }) => (
+        <section className="phase-group" key={phase.id}>
+          <div className="phase-heading">
+            <span className="phase-step">{phase.step === null ? "—" : phase.step}</span>
+            <div>
+              <h2>{phase.label}</h2>
+              <p>{phase.blurb}</p>
             </div>
-            {r.template.notes && <p className="notes">{r.template.notes}</p>}
-            <footer>Source: {r.template.sourceRef}</footer>
-          </article>
-        ))}
-        {filtered.length === 0 && <p className="empty">No phrases match your search.</p>}
-      </div>
+          </div>
+
+          <div className="card-list">
+            {items.map((r) => (
+              <article className="phrase-card" key={r.template.id}>
+                <header>
+                  <h3>{r.template.title}</h3>
+                </header>
+                <div className="ref-body">
+                  <AircraftDiagram position={r.position} values={r.values} />
+                  <div className="ref-text">
+                    <p className="situation">{r.situation}</p>
+                    <div className="model-call">
+                      <span className="label">Model call</span>
+                      <p>“{r.modelCall}”</p>
+                      {speechSupported() && (
+                        <button className="ghost-btn" onClick={() => speak(r.modelCall)}>
+                          ▶ Listen
+                        </button>
+                      )}
+                    </div>
+                    {r.template.notes && <p className="notes">{r.template.notes}</p>}
+                    <footer>Source: {r.template.sourceRef}</footer>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ))}
+
+      {filtered.length === 0 && <p className="empty">No calls match your search.</p>}
     </div>
   );
 }

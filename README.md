@@ -5,12 +5,27 @@ make to ATC and on CTAF frequencies.
 
 ## Modes
 
-- **Trainer** — presents a randomized scenario (aerodrome, aircraft, position, etc.) and asks you
-  to type the radio call you'd make. Your answer is checked against the key elements the call
-  should contain, and the model call is revealed with an optional text-to-speech playback.
-- **Reference** — a searchable, filterable library of standard calls by category (taxi, departure,
-  circuit, position reports, emergency phraseology, etc.).
-- **Sources & Accuracy** — states what the phrase library is based on and its limitations.
+- **Trainer** — walks the 25 calls of a flight in chronological order of operations: startup →
+  taxi → departure → en route → inbound → circuit → landing, with emergency and general phrases
+  as separate non-sequential groups. Each scenario shows a plan-view diagram of where the aircraft
+  is when the call is made, and you answer either by typing or by pressing **Transmit** and
+  speaking. The answer is checked element by element and the model call revealed with
+  text-to-speech playback. One aircraft and aerodrome is used for the whole flight, so the
+  sequence hangs together; **New flight** rolls a fresh one.
+- **Reference** — every call grouped by phase of flight, in the same order, each with its diagram.
+- **Sources & Accuracy** — what the phrase library is based on and its limitations.
+
+## Voice answers
+
+Answering out loud uses the browser's SpeechRecognition API (Chrome, Edge, and Safari; Firefox
+does not implement it). Because speech comes back as it is *spoken* rather than as it is
+*written*, answers are normalised before scoring — `src/lib/scenario.ts` folds phonetic-alphabet
+runs into letters ("victor hotel alpha bravo charlie" → `VH-ABC`), aviation digit words into
+numbers ("one eight" → `18`), and spoken altitudes into figures ("two thousand five hundred" →
+`2500`), so a spoken answer scores the same as a typed one.
+
+The microphone needs a secure context (`https://` or `localhost`) and, in an embedded page, a
+`microphone` permission policy — if it is blocked the app says so and you can type instead.
 
 ## Content basis and accuracy
 

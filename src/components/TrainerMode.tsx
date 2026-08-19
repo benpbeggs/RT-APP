@@ -1,91 +1,218 @@
-import { useState } from "react";
-import { CATEGORY_LABELS, SCENARIOS, type PhraseCategory } from "../data/phraseology";
-import { renderScenario, scoreAnswer, type RenderedScenario, type ScoreResult } from "../lib/scenario";
-import { speak, speechSupported } from "../lib/speech";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { PHASES, PHASE_BY_ID, type PhaseId } from "../data/phraseology";
+import {
+  generateValues,
+  renderScenario,
+  scenariosInScope,
+  scoreAnswer,
+  type GeneratedValues,
+  type ScoreResult,
+} from "../lib/scenario";
+import {
+  recognitionSupported,
+  speak,
+  speechSupported,
+  startRecognition,
+  type SpeechRecognitionLike,
+} from "../lib/speech";
+import { AircraftDiagram } from "./AircraftDiagram";
 
-function pickScenario(category: PhraseCategory | "all"): RenderedScenario {
-  const pool = category === "all" ? SCENARIOS : SCENARIOS.filter((s) => s.category === category);
-  const template = pool[Math.floor(Math.random() * pool.length)];
-  return renderScenario(template);
-}
+type Scope = PhaseId | "all";
 
 export function TrainerMode() {
-  const [category, setCategory] = useState<PhraseCategory | "all">("all");
-  const [current, setCurrent] = useState<RenderedScenario>(() => pickScenario("all"));
+  const [scope, setScope] = useState<Scope>("all");
+  const [index, setIndex] = useState(0);
+  // One aircraft and aerodrome for the whole flight, so the sequence hangs together.
+  const [values, setValues] = useState<GeneratedValues>(() => generateValues());
+
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState<ScoreResult | null>(null);
-  const [streak, setStreak] = useState(0);
 
-  function next(cat: PhraseCategory | "all" = category) {
-    setCurrent(pickScenario(cat));
+  const [listening, setListening] = useState(false);
+  const [interim, setInterim] = useState("");
+  const [micError, setMicError] = useState<string | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  // Text already in the box when the mic opened, so dictation appends.
+  const baseAnswerRef = useRef("");
+
+  const templates = useMemo(() => scenariosInScope(scope), [scope]);
+  const current = useMemo(
+    () => renderScenario(templates[Math.min(index, templates.length - 1)], values),
+    [templates, index, values],
+  );
+
+  const canDictate = recognitionSupported();
+
+  function stopListening() {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setListening(false);
+    setInterim("");
+  }
+
+  // Never leave the microphone open behind a navigation or unmount.
+  useEffect(() => stopListening, []);
+
+  function reset() {
+    stopListening();
     setAnswer("");
     setResult(null);
+    setMicError(null);
+  }
+
+  function goTo(nextIndex: number) {
+    reset();
+    setIndex((nextIndex + templates.length) % templates.length);
+  }
+
+  function changeScope(next: Scope) {
+    reset();
+    setScope(next);
+    setIndex(0);
+  }
+
+  function newFlight() {
+    reset();
+    setValues(generateValues());
+    setIndex(0);
+  }
+
+  function toggleListening() {
+    if (listening) {
+      stopListening();
+      return;
+    }
+    setMicError(null);
+    baseAnswerRef.current = answer.trim();
+
+    const recognition = startRecognition({
+      onTranscript: (final, live) => {
+        const prefix = baseAnswerRef.current ? baseAnswerRef.current + " " : "";
+        setAnswer((prefix + final).trim());
+        setInterim(live);
+      },
+      onError: (message) => {
+        setMicError(message);
+        setListening(false);
+      },
+      onEnd: () => {
+        recognitionRef.current = null;
+        setListening(false);
+        setInterim("");
+      },
+    });
+
+    if (!recognition) {
+      setMicError("This browser doesn't support speech recognition. Try Chrome, Edge, or Safari.");
+      return;
+    }
+    recognitionRef.current = recognition;
+    setListening(true);
   }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!answer.trim()) return;
-    const r = scoreAnswer(answer, current.requiredElements);
-    setResult(r);
-    setStreak(r.score >= 0.8 ? streak + 1 : 0);
+    stopListening();
+    setResult(scoreAnswer(answer, current.requiredElements));
   }
+
+  const phase = PHASE_BY_ID[current.template.phase];
+  const scoreClass = !result ? "" : result.score >= 0.8 ? "good" : result.score >= 0.4 ? "ok" : "bad";
 
   return (
     <div className="mode-panel">
       <div className="filters">
-        <select
-          value={category}
-          onChange={(e) => {
-            const c = e.target.value as PhraseCategory | "all";
-            setCategory(c);
-            next(c);
-          }}
-        >
-          <option value="all">All categories</option>
-          {(Object.keys(CATEGORY_LABELS) as PhraseCategory[]).map((c) => (
-            <option key={c} value={c}>
-              {CATEGORY_LABELS[c]}
+        <select value={scope} onChange={(e) => changeScope(e.target.value as Scope)}>
+          <option value="all">Full flight — every call in order</option>
+          {PHASES.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.step === null ? p.label : `${p.step}. ${p.label}`}
             </option>
           ))}
         </select>
-        <span className="streak">Streak: {streak}</span>
+        <button type="button" className="ghost-btn" onClick={newFlight}>
+          New flight
+        </button>
+        <span className="progress-count">
+          Call {index + 1} of {templates.length}
+        </span>
+      </div>
+
+      <div className="progress-track" aria-hidden="true">
+        <div
+          className="progress-fill"
+          style={{ width: `${((index + 1) / templates.length) * 100}%` }}
+        />
       </div>
 
       <article className="phrase-card scenario-card">
         <header>
-          <span className={`chip chip-${current.template.category}`}>
-            {CATEGORY_LABELS[current.template.category]}
+          <span className="chip">
+            {phase.step === null ? phase.label : `${phase.step} · ${phase.label}`}
           </span>
           <h3>{current.template.title}</h3>
         </header>
-        <p className="situation">{current.situation}</p>
+
+        <div className="scenario-body">
+          <AircraftDiagram position={current.position} values={current.values} />
+          <p className="situation">{current.situation}</p>
+        </div>
 
         <form onSubmit={submit}>
           <label htmlFor="answer">Your radio call</label>
           <textarea
             id="answer"
-            value={answer}
+            value={answer + (interim ? ` ${interim}` : "")}
             onChange={(e) => setAnswer(e.target.value)}
-            placeholder="Type exactly what you would transmit…"
+            placeholder="Type your call, or press Transmit and say it out loud…"
             rows={3}
           />
+
           <div className="actions">
             <button type="submit">Check my call</button>
-            <button type="button" className="ghost-btn" onClick={() => next()}>
-              Skip / New scenario
+            {canDictate && (
+              <button
+                type="button"
+                className={`mic-btn ${listening ? "listening" : ""}`}
+                onClick={toggleListening}
+                aria-pressed={listening}
+              >
+                <span className="mic-dot" aria-hidden="true" />
+                {listening ? "Stop transmitting" : "Transmit"}
+              </button>
+            )}
+            <button type="button" className="ghost-btn" onClick={() => goTo(index - 1)}>
+              ← Previous
+            </button>
+            <button type="button" className="ghost-btn" onClick={() => goTo(index + 1)}>
+              Next call →
             </button>
           </div>
+
+          {listening && <p className="mic-hint">Listening — speak your call, then press stop.</p>}
+          {micError && <p className="mic-error">{micError}</p>}
+          {!canDictate && (
+            <p className="mic-hint subtle">
+              Voice answers need Chrome, Edge, or Safari — type your call instead.
+            </p>
+          )}
         </form>
 
         {result && (
-          <div className={`result ${result.score >= 0.8 ? "good" : result.score >= 0.4 ? "ok" : "bad"}`}>
+          <div className={`result ${scoreClass}`}>
             <p className="score">
-              {Math.round(result.score * 100)}% of key elements included
+              {result.matchedCount} of {result.elements.length} key elements
               {result.score >= 0.8 ? " — nice call." : ""}
             </p>
-            {result.missing.length > 0 && (
-              <p className="missing">Missing: {result.missing.join(", ")}</p>
-            )}
+            <ul className="element-list">
+              {result.elements.map((el) => (
+                <li key={el.element} className={el.matched ? "hit" : "miss"}>
+                  <span aria-hidden="true">{el.matched ? "✓" : "✗"}</span>
+                  {el.element}
+                </li>
+              ))}
+            </ul>
             <div className="model-call">
               <span className="label">Model call</span>
               <p>“{current.modelCall}”</p>
