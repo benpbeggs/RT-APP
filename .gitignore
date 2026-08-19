@@ -9,6 +9,9 @@ lerna-debug.log*
 
 node_modules
 dist
+
+# Scratch file handed from the phrase-bank driver to the Python renderer.
+src/assets/.tokens.json
 dist-ssr
 *.local
 

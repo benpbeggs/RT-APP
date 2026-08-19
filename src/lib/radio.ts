@@ -13,6 +13,10 @@
 // little fast and low), and the filtered radio artefacts are layered around
 // it. That carries most of the effect.
 
+import bankAudioUrl from "../assets/phrase-bank.wav?url";
+import bankIndexUrl from "../assets/phrase-bank.json?url";
+import { tokenize } from "./lexicon";
+
 const STORAGE_KEY = "rt-app.radio-effects";
 
 let effectsEnabled = readStoredPreference();
@@ -198,23 +202,176 @@ let closeCarrier: (() => void) | null = null;
 // Bumped per transmission so a late callback from a superseded one — a pending
 // failsafe timer, a stray onend — cannot close the carrier of the current one.
 let generation = 0;
+let playingClips: AudioBufferSourceNode[] = [];
 
 /** Stop any transmission currently in progress. */
 export function stopTransmission(): void {
   generation += 1;
   if (transmitSupported()) window.speechSynthesis.cancel();
+  for (const node of playingClips) {
+    try {
+      node.stop();
+    } catch {
+      // Already finished; nothing to stop.
+    }
+  }
+  playingClips = [];
   closeCarrier?.();
   closeCarrier = null;
 }
 
+// ----------------------------------------------------------------- phrase bank
+
+interface PhraseBank {
+  buffer: AudioBuffer;
+  clips: Record<string, [offset: number, length: number]>;
+  sampleRate: number;
+}
+
+let bankPromise: Promise<PhraseBank | null> | null = null;
+
 /**
- * Speak a call the way it would sound over the air. With effects switched off
- * this is a plain, clearly-spoken utterance — useful when you are learning the
- * wording and want maximum intelligibility.
+ * Load the recorded phrase bank: one sprite of every token, already put
+ * through the comms processing chain offline. Loaded once, on first use.
+ */
+function loadBank(ctx: AudioContext): Promise<PhraseBank | null> {
+  bankPromise ??= (async () => {
+    try {
+      const [wav, index] = await Promise.all([
+        fetch(bankAudioUrl).then((r) => {
+          if (!r.ok) throw new Error(`phrase bank audio: ${r.status}`);
+          return r.arrayBuffer();
+        }),
+        fetch(bankIndexUrl).then((r) => {
+          if (!r.ok) throw new Error(`phrase bank index: ${r.status}`);
+          return r.json() as Promise<{ sampleRate: number; clips: PhraseBank["clips"] }>;
+        }),
+      ]);
+      const buffer = await ctx.decodeAudioData(wav);
+      return { buffer, clips: index.clips, sampleRate: index.sampleRate };
+    } catch {
+      // Any failure here just means we speak the call with the synthesiser.
+      return null;
+    }
+  })();
+  return bankPromise;
+}
+
+interface ResolvedClip {
+  offset: number;
+  duration: number;
+  pauseAfter: number;
+}
+
+/**
+ * Resolve every token to a clip up front. Returning null before anything is
+ * scheduled is what lets the caller fall back cleanly — a half-scheduled call
+ * would otherwise play over the top of the synthesised one.
+ */
+function resolveClips(bank: PhraseBank, text: string): ResolvedClip[] | null {
+  const { spoken, missing } = tokenize(text);
+  if (missing.length > 0 || spoken.length === 0) return null;
+
+  const resolved: ResolvedClip[] = [];
+  for (const { token, pauseAfter } of spoken) {
+    const clip = bank.clips[token];
+    if (!clip) return null;
+    resolved.push({
+      offset: clip[0] / bank.sampleRate,
+      duration: clip[1] / bank.sampleRate,
+      pauseAfter,
+    });
+  }
+  return resolved;
+}
+
+/** Schedule the resolved clips back to back. Returns when the last one ends. */
+function scheduleClips(
+  ctx: AudioContext,
+  bank: PhraseBank,
+  clips: ResolvedClip[],
+  startAt: number,
+): number {
+  const output = ctx.createGain();
+  output.gain.value = 1;
+  output.connect(ctx.destination);
+
+  let cursor = startAt;
+  for (const { offset, duration, pauseAfter } of clips) {
+    const source = ctx.createBufferSource();
+    source.buffer = bank.buffer;
+    source.connect(output);
+    source.start(cursor, offset, duration);
+    source.stop(cursor + duration);
+    playingClips.push(source);
+    source.onended = () => {
+      source.disconnect();
+      playingClips = playingClips.filter((n) => n !== source);
+    };
+    cursor += duration + pauseAfter;
+  }
+  return cursor;
+}
+
+/**
+ * Speak a call the way it would sound over the air.
+ *
+ * With effects on this plays the recorded phrase bank — real audio that has
+ * been through the comms chain offline, which is the only way to get a
+ * genuinely filtered voice in a browser. If the bank cannot be loaded or does
+ * not cover the text, it falls back to the speech synthesiser so a call is
+ * never silently dropped. With effects off it is always plain, clearly-spoken
+ * synthesis, which is easier to learn the wording from.
  */
 export function transmit(text: string): void {
-  if (!transmitSupported()) return;
   stopTransmission();
+
+  const ctx = effectsEnabled ? getContext() : null;
+  if (ctx) {
+    const mine = generation;
+    void loadBank(ctx).then((bank) => {
+      if (mine !== generation) return;
+      if (bank && playRecorded(ctx, bank, text)) return;
+      speakFallback(text);
+    });
+    return;
+  }
+
+  speakFallback(text);
+}
+
+/** The recorded path: clips through the offline-filtered bank, plus artefacts. */
+function playRecorded(ctx: AudioContext, bank: PhraseBank, text: string): boolean {
+  // Resolve before making a sound, so a miss falls back cleanly.
+  const clips = resolveClips(bank, text);
+  if (!clips) return false;
+
+  const mine = generation;
+  const start = ctx.currentTime;
+  pttClick(ctx, start);
+  squelch(ctx, start + 0.015, 0.07, 0.09);
+
+  // Let the click and opening squelch land before the voice starts.
+  const finishesAt = scheduleClips(ctx, bank, clips, start + 0.16);
+
+  closeCarrier = openCarrier(ctx);
+
+  const remaining = Math.max(0, (finishesAt - ctx.currentTime) * 1000);
+  window.setTimeout(() => {
+    if (mine !== generation || !closeCarrier) return;
+    closeCarrier();
+    closeCarrier = null;
+    const end = ctx.currentTime;
+    squelch(ctx, end + 0.02, 0.13, 0.12);
+    pttClick(ctx, end + 0.1, 0.04);
+  }, remaining + 40);
+
+  return true;
+}
+
+/** The synthesiser path — unfiltered, but always available. */
+function speakFallback(text: string): void {
+  if (!transmitSupported()) return;
 
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "en-AU";

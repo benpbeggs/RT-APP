@@ -28,19 +28,39 @@ controlled flight a towered one. Both give a complete sequence — 18 calls on a
 
 ## Radio audio
 
-Playback is coloured to sound like a VHF transmission rather than a phone assistant: the PTT
-click, a burst of squelch as the carrier opens, a faint hiss under the voice, and a squelch tail
-and release click at the end — all synthesised with Web Audio in `src/lib/radio.ts` and pushed
-through a 340 Hz–2900 Hz passband with a presence peak at 1.8 kHz, which is what makes comms audio
-sound thin and forward. The voice is set to a controller's cadence (slightly fast, slightly low).
+Playback sounds like a VHF transmission rather than a phone assistant: the PTT click, a burst of
+squelch as the carrier opens, a faint hiss under the voice, a squelch tail and a release click.
 
-One limitation worth knowing: the Web Speech API exposes no audio node or media element for
-synthesised speech, so the **voice itself cannot be routed through the filter** — only the
-artefacts around it can be. There is no standard way around this in a browser; a fully filtered
-voice would need pre-recorded or server-generated audio instead of live TTS.
+The voice is **recorded, not synthesised at playback**. The Web Speech API exposes no audio node
+for synthesised speech, so a live TTS voice cannot be filtered in the browser — which is why the
+voice is rendered ahead of time instead, put through the comms chain offline, and played back as
+audio. Processing (`scripts/build-phrase-bank.py`) is a 300–2900 Hz windowed-sinc bandpass, an
+envelope-following compressor, `tanh` saturation for transmitter grit, and a resample to 8 kHz —
+authentic for a signal band-limited to 2.9 kHz, and it halves the file. Measured result: 99.8% of
+the bank's energy sits inside the passband.
 
-The **Radio FX** toggle in the header turns the effect off for clear, unprocessed speech, which is
-better when you are still learning the wording. The choice persists in `localStorage`.
+Because calls are generated — the callsign, aerodrome, runway, altitude and distance all vary —
+whole sentences cannot be pre-recorded. Instead each **token** is recorded once and sentences are
+assembled at playback, the way automated aeronautical audio (ATIS and the like) is built:
+
+- `src/lib/lexicon.ts` is the single source of truth: the token list, and the `tokenize()` that
+  turns a call into clips. Registrations become phonetics (`VH-ABC` → victor hotel alpha bravo
+  charlie) and numbers take aviation forms — `13` reads digit-by-digit ("one three") while `2500`
+  groups ("two thousand five hundred").
+- `npm run build:audio` renders every token with espeak-ng and packs them into one WAV sprite
+  (`src/assets/phrase-bank.wav`, 116 clips, 74 s, 1.2 MB) plus a JSON index of offsets. The app
+  fetches it once, decodes it once, and slices clips out at playback.
+- `npm run check:audio` proves every call the app can generate is fully speakable — it sweeps all
+  9,300 combinations of scenario and vocabulary and fails on any token the bank lacks. **Run it
+  after touching any model call**, then rebuild the bank if it reports a gap.
+
+Regenerating the bank needs `espeak-ng` and `python3` with `numpy`; building or running the app
+does not — the generated sprite is committed.
+
+If the bank cannot be loaded, or a call somehow needs a token it lacks, playback falls back to the
+speech synthesiser so a call is never silently dropped. The **Radio FX** toggle in the header
+switches to plain unprocessed speech, which is easier to learn the wording from; the choice
+persists in `localStorage`.
 
 ## Voice answers
 
