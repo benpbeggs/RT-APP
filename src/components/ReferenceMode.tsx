@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { AERODROME_TYPE_LABELS, PHASES, type AerodromeType } from "../data/phraseology";
 import { generateValues, renderScenario, scenariosInScope } from "../lib/scenario";
-import { speak, speechSupported } from "../lib/speech";
+import { transmit, transmitSupported } from "../lib/radio";
 import { AircraftDiagram } from "./AircraftDiagram";
 
 export function ReferenceMode() {
@@ -79,8 +79,8 @@ export function ReferenceMode() {
                     <div className="model-call">
                       <span className="label">Model call</span>
                       <p>“{r.modelCall}”</p>
-                      {speechSupported() && (
-                        <button className="ghost-btn" onClick={() => speak(r.modelCall)}>
+                      {transmitSupported() && (
+                        <button className="ghost-btn" onClick={() => transmit(r.modelCall)}>
                           ▶ Listen
                         </button>
                       )}

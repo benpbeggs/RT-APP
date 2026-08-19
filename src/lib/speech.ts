@@ -1,21 +1,6 @@
-// Browser speech: text-to-speech for model calls, and speech recognition so a
-// trainee can answer by talking on a headset-style push-to-talk button rather
-// than typing. Both are progressive enhancements — the app works without them.
-
-// ---------------------------------------------------------------- text to speech
-
-export function speechSupported(): boolean {
-  return typeof window !== "undefined" && "speechSynthesis" in window;
-}
-
-export function speak(text: string): void {
-  if (!speechSupported()) return;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "en-AU";
-  utterance.rate = 0.95;
-  window.speechSynthesis.speak(utterance);
-}
+// Speech recognition, so a trainee can answer by talking on a headset-style
+// push-to-talk button rather than typing. A progressive enhancement — the app
+// works without it. Spoken *output* lives in radio.ts.
 
 // ------------------------------------------------------------ speech recognition
 

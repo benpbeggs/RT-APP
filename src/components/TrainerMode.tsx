@@ -16,11 +16,10 @@ import {
 } from "../lib/scenario";
 import {
   recognitionSupported,
-  speak,
-  speechSupported,
   startRecognition,
   type SpeechRecognitionLike,
 } from "../lib/speech";
+import { transmit, transmitSupported } from "../lib/radio";
 import { AircraftDiagram } from "./AircraftDiagram";
 
 type Scope = PhaseId | "all";
@@ -256,8 +255,8 @@ export function TrainerMode() {
             <div className="model-call">
               <span className="label">Model call</span>
               <p>“{current.modelCall}”</p>
-              {speechSupported() && (
-                <button className="ghost-btn" type="button" onClick={() => speak(current.modelCall)}>
+              {transmitSupported() && (
+                <button className="ghost-btn" type="button" onClick={() => transmit(current.modelCall)}>
                   ▶ Listen
                 </button>
               )}

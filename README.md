@@ -26,6 +26,22 @@ controlled flight a towered one. Both give a complete sequence — 18 calls on a
 - **Reference** — every call grouped by phase of flight, in the same order, each with its diagram.
 - **Sources & Accuracy** — what the phrase library is based on and its limitations.
 
+## Radio audio
+
+Playback is coloured to sound like a VHF transmission rather than a phone assistant: the PTT
+click, a burst of squelch as the carrier opens, a faint hiss under the voice, and a squelch tail
+and release click at the end — all synthesised with Web Audio in `src/lib/radio.ts` and pushed
+through a 340 Hz–2900 Hz passband with a presence peak at 1.8 kHz, which is what makes comms audio
+sound thin and forward. The voice is set to a controller's cadence (slightly fast, slightly low).
+
+One limitation worth knowing: the Web Speech API exposes no audio node or media element for
+synthesised speech, so the **voice itself cannot be routed through the filter** — only the
+artefacts around it can be. There is no standard way around this in a browser; a fully filtered
+voice would need pre-recorded or server-generated audio instead of live TTS.
+
+The **Radio FX** toggle in the header turns the effect off for clear, unprocessed speech, which is
+better when you are still learning the wording. The choice persists in `localStorage`.
+
 ## Voice answers
 
 Answering out loud uses the browser's SpeechRecognition API (Chrome, Edge, and Safari; Firefox

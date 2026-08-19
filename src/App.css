@@ -37,10 +37,55 @@ body {
   padding: 24px 16px 72px;
 }
 
+.app-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
 .app-header h1 {
   margin: 0;
   font-size: 1.9rem;
   letter-spacing: 0.02em;
+}
+
+.fx-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  font-family: var(--mono);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fx-toggle:hover {
+  border-color: var(--accent-dim);
+}
+
+.fx-toggle.on {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+  background: rgba(79, 216, 196, 0.08);
+}
+
+.fx-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.fx-toggle.on .fx-dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
 }
 
 .app-header .tagline {
