@@ -1,7 +1,13 @@
-import type { PhaseId, PositionKind, ScenarioTemplate } from "../data/phraseology";
+import type { AerodromeType, PhaseId, PositionKind, ScenarioTemplate } from "../data/phraseology";
 import { SCENARIOS } from "../data/phraseology";
 
-const AERODROMES = ["Bankstown", "Moorabbin", "Archerfield", "Jandakot", "Parafield", "Camden"];
+// Illustrative field names only — airspace classification changes, so the app
+// never asserts that a given aerodrome is towered today. See ACCURACY_DISCLAIMER.
+const AERODROMES: Record<AerodromeType, string[]> = {
+  ctaf: ["Cessnock", "Goulburn", "Temora", "Mangalore", "Warwick", "Latrobe Valley"],
+  controlled: ["Bankstown", "Moorabbin", "Archerfield", "Jandakot", "Parafield", "Camden"],
+};
+
 const AIRCRAFT_TYPES = ["Cessna 172", "Piper Warrior", "Diamond DA40", "Jabiru"];
 const RUNWAYS = ["18", "25", "07", "36", "22", "04"];
 const WINDS = ["180 at 10", "250 at 8", "070 at 12", "360 at 6"];
@@ -15,11 +21,15 @@ function pick<T>(arr: T[]): T {
 }
 
 export interface GeneratedValues {
+  aerodromeType: AerodromeType;
   callsign: string;
   aircraftType: string;
   aerodrome: string;
+  /** Who you're calling: "Traffic" on a CTAF, "Tower" at a controlled field. */
+  station: string;
   runway: string;
   wind: string;
+  qnh: string;
   compass: string;
   distanceNm: string;
   altitude: string;
@@ -29,16 +39,19 @@ export interface GeneratedValues {
 }
 
 /** One consistent aircraft/aerodrome set, reused across a whole flight sequence. */
-export function generateValues(): GeneratedValues {
+export function generateValues(aerodromeType: AerodromeType = "ctaf"): GeneratedValues {
   const aircraftType = pick(AIRCRAFT_TYPES);
   let suffix = "";
   for (let i = 0; i < 3; i++) suffix += pick(LETTERS.split(""));
   return {
+    aerodromeType,
     callsign: `${aircraftType.split(" ")[0]} VH-${suffix}`,
     aircraftType,
-    aerodrome: pick(AERODROMES),
+    aerodrome: pick(AERODROMES[aerodromeType]),
+    station: aerodromeType === "ctaf" ? "Traffic" : "Tower",
     runway: pick(RUNWAYS),
     wind: pick(WINDS),
+    qnh: String(1005 + Math.floor(Math.random() * 21)),
     compass: pick(COMPASS),
     distanceNm: String(2 + Math.floor(Math.random() * 13)),
     altitude: `${1 + Math.floor(Math.random() * 4)}500`,
@@ -234,7 +247,13 @@ export function renderScenario(
   };
 }
 
-/** The scenarios in scope, in chronological order of operations. */
-export function scenariosInScope(scope: PhaseId | "all"): ScenarioTemplate[] {
-  return scope === "all" ? SCENARIOS : SCENARIOS.filter((s) => s.phase === scope);
+/** The scenarios in scope for an aerodrome type, in chronological order. */
+export function scenariosInScope(
+  scope: PhaseId | "all",
+  aerodromeType: AerodromeType,
+): ScenarioTemplate[] {
+  return SCENARIOS.filter(
+    (s) =>
+      (scope === "all" || s.phase === scope) && s.aerodromeTypes.includes(aerodromeType),
+  );
 }

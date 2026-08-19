@@ -3,9 +3,20 @@
 A web app for practicing Australian radiotelephony (RT) — the standard radio calls VFR pilots
 make to ATC and on CTAF frequencies.
 
+## Aerodrome type
+
+A dropdown in both Trainer and Reference switches the whole app between **CTAF (non-towered)** and
+**Controlled (towered)**, because the two are different disciplines: on a CTAF you *broadcast* your
+intentions to other traffic ("Traffic, …, taxiing runway 18"), while in controlled airspace you
+*request* and *read back* clearances. Each call in `src/data/phraseology.ts` is tagged with the
+aerodrome types it belongs at, and calls that read the same at both (position reports, PAN
+PAN/MAYDAY, general phrases) use a `{station}` placeholder that resolves to "Traffic" or "Tower".
+Switching type also re-rolls the aerodrome, so a CTAF flight uses a non-towered field and a
+controlled flight a towered one. Both give a complete sequence — 18 calls on a CTAF, 19 controlled.
+
 ## Modes
 
-- **Trainer** — walks the 25 calls of a flight in chronological order of operations: startup →
+- **Trainer** — walks the calls of a flight in chronological order of operations: startup →
   taxi → departure → en route → inbound → circuit → landing, with emergency and general phrases
   as separate non-sequential groups. Each scenario shows a plan-view diagram of where the aircraft
   is when the call is made, and you answer either by typing or by pressing **Transmit** and

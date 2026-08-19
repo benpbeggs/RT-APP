@@ -27,4 +27,8 @@ casa.gov.au, airservicesaustralia.com and similar sites), so it has not been ver
 against the current published revision. VFRG and AIP wording is amended periodically (VFRG versions,
 AIRAC cycles). Treat this app as a practice aid for call structure and radio discipline, not as an
 authoritative reference — always confirm current phraseology against the latest CASA VFRG and
-Airservices AIP before relying on it operationally.`;
+Airservices AIP before relying on it operationally.
+
+Aerodrome names in the scenarios are illustrative scenery for the practice call, not a statement
+about any real field. Airspace classification and tower hours change — check ERSA and current
+charts for whether a given aerodrome is towered or a CTAF before you fly there.`;

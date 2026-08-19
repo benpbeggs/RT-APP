@@ -10,6 +10,13 @@
 // This file is the single place to update wording if it drifts from the
 // current official publications — see SOURCES in src/data/sources.ts.
 
+/**
+ * Whether a call belongs at a non-towered (CTAF) field, a towered/controlled
+ * one, or reads the same at both. At a CTAF you broadcast your intentions to
+ * other traffic; in controlled airspace you request, and read back, clearances.
+ */
+export type AerodromeType = "ctaf" | "controlled";
+
 /** Where the aircraft physically is when the call is made — drives the diagram. */
 export type PositionKind =
   | "apron"
@@ -53,12 +60,7 @@ export const PHASES: Phase[] = [
     label: "Startup",
     blurb: "Before you move — confirm the radio works and you're on the right frequency.",
   },
-  {
-    id: "taxi",
-    step: 2,
-    label: "Taxi",
-    blurb: "Leaving the apron for the runway.",
-  },
+  { id: "taxi", step: 2, label: "Taxi", blurb: "Leaving the apron for the runway." },
   {
     id: "departure",
     step: 3,
@@ -83,12 +85,7 @@ export const PHASES: Phase[] = [
     label: "Circuit",
     blurb: "Flying the pattern — crosswind, downwind, base, final.",
   },
-  {
-    id: "landing",
-    step: 7,
-    label: "Landing",
-    blurb: "Touchdown and vacating the runway.",
-  },
+  { id: "landing", step: 7, label: "Landing", blurb: "Touchdown and vacating the runway." },
   {
     id: "general",
     step: null,
@@ -107,9 +104,16 @@ export const PHASE_BY_ID: Record<PhaseId, Phase> = Object.fromEntries(
   PHASES.map((p) => [p.id, p]),
 ) as Record<PhaseId, Phase>;
 
+export const AERODROME_TYPE_LABELS: Record<AerodromeType, string> = {
+  ctaf: "CTAF — non-towered",
+  controlled: "Controlled — towered",
+};
+
 export interface ScenarioTemplate {
   id: string;
   phase: PhaseId;
+  /** Which kind of aerodrome this call belongs at. Both = wording is the same. */
+  aerodromeTypes: AerodromeType[];
   title: string;
   /** Where the aircraft is when making this call. */
   position: PositionKind;
@@ -124,12 +128,17 @@ export interface ScenarioTemplate {
   sourceRef: string;
 }
 
+const CTAF: AerodromeType[] = ["ctaf"];
+const TWR: AerodromeType[] = ["controlled"];
+const BOTH: AerodromeType[] = ["ctaf", "controlled"];
+
 /** Ordered by phase of flight, then by order within the phase. */
 export const SCENARIOS: ScenarioTemplate[] = [
   // ------------------------------------------------------------------ 1. STARTUP
   {
     id: "startup-radio-check-ctaf",
     phase: "startup",
+    aerodromeTypes: CTAF,
     title: "Radio check on the CTAF",
     position: "apron",
     situation:
@@ -143,7 +152,8 @@ export const SCENARIOS: ScenarioTemplate[] = [
   {
     id: "startup-radio-check-tower",
     phase: "startup",
-    title: "Radio check with a ground station",
+    aerodromeTypes: TWR,
+    title: "Radio check with Ground",
     position: "apron",
     situation:
       "You are {callsign} on the apron at {aerodrome} (controlled). Request a radio check from Ground.",
@@ -157,11 +167,12 @@ export const SCENARIOS: ScenarioTemplate[] = [
   {
     id: "taxi-ctaf",
     phase: "taxi",
-    title: "CTAF taxi broadcast",
+    aerodromeTypes: CTAF,
+    title: "Taxi broadcast",
     position: "taxiway",
     situation:
       "You are {callsign}, a {aircraftType}, at {aerodrome} (CTAF). You are about to taxi from the apron for a local flight to the training area, using runway {runway}. Make your taxi broadcast.",
-    modelCall: "{aerodrome} Traffic, {callsign}, {aircraftType}, taxiing runway {runway}, {aerodrome}",
+    modelCall: "{aerodrome} Traffic, {callsign}, taxiing runway {runway}, {aerodrome}",
     requiredElements: ["{aerodrome}", "traffic", "{callsign}", "taxiing", "runway {runway}"],
     notes:
       "CTAF broadcasts start and end with the location — it tells anyone on a shared frequency which field you're at.",
@@ -170,12 +181,13 @@ export const SCENARIOS: ScenarioTemplate[] = [
   {
     id: "taxi-tower-request",
     phase: "taxi",
-    title: "Requesting taxi at a towered aerodrome",
+    aerodromeTypes: TWR,
+    title: "Requesting taxi",
     position: "apron",
     situation:
       "You are {callsign} at {aerodrome} (controlled), ready to taxi for a flight to the training area. You have listened to ATIS information Alpha. Call Ground.",
     modelCall:
-      "{aerodrome} Ground, {callsign}, {aircraftType}, information Alpha, request taxi, training area",
+      "{aerodrome} Ground, {callsign}, information Alpha, request taxi, training area",
     requiredElements: ["{aerodrome}", "ground", "{callsign}", "information alpha", "request taxi"],
     notes: "Quoting the ATIS code tells the controller you already have the current field information.",
     sourceRef: "VFRG Ch5 – Radio procedures at controlled aerodromes",
@@ -183,12 +195,13 @@ export const SCENARIOS: ScenarioTemplate[] = [
   {
     id: "taxi-readback",
     phase: "taxi",
+    aerodromeTypes: TWR,
     title: "Reading back a taxi clearance",
     position: "taxiway",
     situation:
-      'Ground replies: "{callsign}, taxi to holding point runway {runway} via taxiway alpha." Read the clearance back.',
-    modelCall: "Taxi holding point runway {runway} via alpha, {callsign}",
-    requiredElements: ["taxi", "holding point", "runway {runway}", "alpha", "{callsign}"],
+      'Ground replies: "{callsign}, taxi to holding point runway {runway} via taxiway alpha, QNH {qnh}." Read the clearance back.',
+    modelCall: "Taxi holding point runway {runway} via alpha, QNH {qnh}, {callsign}",
+    requiredElements: ["taxi", "holding point", "runway {runway}", "alpha", "qnh {qnh}", "{callsign}"],
     notes:
       "Read back all clearance elements in the order given. On a readback the callsign normally goes last.",
     sourceRef: "VFRG Ch5 – Read-back requirements",
@@ -198,6 +211,7 @@ export const SCENARIOS: ScenarioTemplate[] = [
   {
     id: "departure-ready",
     phase: "departure",
+    aerodromeTypes: TWR,
     title: "Ready at the holding point",
     position: "holding-point",
     situation:
@@ -207,9 +221,22 @@ export const SCENARIOS: ScenarioTemplate[] = [
     sourceRef: "VFRG Ch5 – Radio procedures at controlled aerodromes",
   },
   {
+    id: "departure-lineup-readback",
+    phase: "departure",
+    aerodromeTypes: TWR,
+    title: "Reading back a line-up clearance",
+    position: "holding-point",
+    situation: 'Tower says: "{callsign}, line up runway {runway}." Read it back.',
+    modelCall: "Line up runway {runway}, {callsign}",
+    requiredElements: ["line up", "runway {runway}", "{callsign}"],
+    notes: "A line-up clearance is not a takeoff clearance — hold on the runway until cleared.",
+    sourceRef: "VFRG Ch5 – Read-back requirements",
+  },
+  {
     id: "departure-entering-runway",
     phase: "departure",
-    title: "Entering the runway (CTAF)",
+    aerodromeTypes: CTAF,
+    title: "Entering the runway",
     position: "holding-point",
     situation:
       "You are {callsign} at the holding point for runway {runway} at {aerodrome} (CTAF), about to line up and depart. Make your broadcast.",
@@ -221,6 +248,7 @@ export const SCENARIOS: ScenarioTemplate[] = [
   {
     id: "departure-takeoff-readback",
     phase: "departure",
+    aerodromeTypes: TWR,
     title: "Reading back a takeoff clearance",
     position: "runway",
     situation: 'Tower says: "{callsign}, wind {wind}, runway {runway}, cleared for takeoff." Read it back.',
@@ -233,7 +261,8 @@ export const SCENARIOS: ScenarioTemplate[] = [
   {
     id: "departure-airborne",
     phase: "departure",
-    title: "CTAF airborne broadcast",
+    aerodromeTypes: CTAF,
+    title: "Airborne broadcast",
     position: "upwind",
     situation:
       "You are {callsign}, just airborne off runway {runway} at {aerodrome} (CTAF), tracking to the training area. Make your airborne broadcast.",
@@ -243,8 +272,9 @@ export const SCENARIOS: ScenarioTemplate[] = [
     sourceRef: "VFRG Ch5 – CTAF procedures",
   },
   {
-    id: "departure-leaving-circuit",
+    id: "departure-leaving-circuit-ctaf",
     phase: "departure",
+    aerodromeTypes: CTAF,
     title: "Departing the circuit",
     position: "crosswind",
     situation:
@@ -254,11 +284,25 @@ export const SCENARIOS: ScenarioTemplate[] = [
     requiredElements: ["{aerodrome}", "traffic", "{callsign}", "departing", "{compass}", "{altitude}"],
     sourceRef: "VFRG Ch5 – CTAF procedures",
   },
+  {
+    id: "departure-frequency-change",
+    phase: "departure",
+    aerodromeTypes: TWR,
+    title: "Reading back a frequency change",
+    position: "crosswind",
+    situation:
+      'Climbing out of {aerodrome}, Tower says: "{callsign}, clear of the control zone, frequency change approved." Read it back.',
+    modelCall: "Frequency change approved, {callsign}",
+    requiredElements: ["frequency change", "{callsign}"],
+    notes: "Don't leave a tower frequency until you're told you can — or you've asked and been approved.",
+    sourceRef: "VFRG Ch5 – Radio procedures at controlled aerodromes",
+  },
 
   // ----------------------------------------------------------------- 4. EN ROUTE
   {
     id: "enroute-position-report",
     phase: "enroute",
+    aerodromeTypes: BOTH,
     title: "En-route position report",
     position: "bearing",
     situation:
@@ -272,9 +316,10 @@ export const SCENARIOS: ScenarioTemplate[] = [
   {
     id: "enroute-traffic-request",
     phase: "enroute",
+    aerodromeTypes: BOTH,
     title: "Requesting traffic information",
     position: "bearing",
-    situation: "You are {callsign} and want ATC to advise you of other traffic in your vicinity. Make the request.",
+    situation: "You are {callsign} and want to be advised of other traffic in your vicinity. Make the request.",
     modelCall: "{callsign}, request traffic information",
     requiredElements: ["{callsign}", "request traffic"],
     sourceRef: "VFRG Ch5 – Standard words and phrases",
@@ -284,12 +329,13 @@ export const SCENARIOS: ScenarioTemplate[] = [
   {
     id: "inbound-ctaf",
     phase: "inbound",
-    title: "CTAF inbound call",
+    aerodromeTypes: CTAF,
+    title: "Inbound call",
     position: "bearing",
     situation:
       "You are {callsign}, a {aircraftType}, {distanceNm} NM to the {compass} of {aerodrome} (CTAF), at {altitude} feet, inbound for landing. Make your inbound broadcast.",
     modelCall:
-      "{aerodrome} Traffic, {callsign}, {aircraftType}, {distanceNm} miles {compass}, {altitude}, inbound, {aerodrome}",
+      "{aerodrome} Traffic, {callsign}, {distanceNm} miles {compass}, {altitude}, inbound, {aerodrome}",
     requiredElements: [
       "{aerodrome}",
       "traffic",
@@ -305,7 +351,8 @@ export const SCENARIOS: ScenarioTemplate[] = [
   {
     id: "inbound-tower-request",
     phase: "inbound",
-    title: "Inbound call at a towered aerodrome",
+    aerodromeTypes: TWR,
+    title: "Inbound call to Tower",
     position: "bearing",
     situation:
       "You are {callsign}, {distanceNm} NM {compass} of {aerodrome} (controlled), at {altitude} feet, with ATIS information Bravo, inbound for landing. Call Tower.",
@@ -323,8 +370,9 @@ export const SCENARIOS: ScenarioTemplate[] = [
     sourceRef: "VFRG Ch5 – Radio procedures at controlled aerodromes",
   },
   {
-    id: "inbound-joining",
+    id: "inbound-joining-ctaf",
     phase: "inbound",
+    aerodromeTypes: CTAF,
     title: "Joining the circuit",
     position: "circuit-leg",
     situation:
@@ -333,11 +381,25 @@ export const SCENARIOS: ScenarioTemplate[] = [
     requiredElements: ["{aerodrome}", "traffic", "{callsign}", "joining", "{circuitLeg}", "runway {runway}"],
     sourceRef: "VFRG Ch5 – CTAF procedures / joining instructions",
   },
+  {
+    id: "inbound-joining-readback",
+    phase: "inbound",
+    aerodromeTypes: TWR,
+    title: "Reading back joining instructions",
+    position: "circuit-leg",
+    situation:
+      'Tower says: "{callsign}, join {circuitLeg} runway {runway}, QNH {qnh}." Read the instructions back.',
+    modelCall: "Join {circuitLeg} runway {runway}, QNH {qnh}, {callsign}",
+    requiredElements: ["join", "{circuitLeg}", "runway {runway}", "qnh {qnh}", "{callsign}"],
+    notes: "In controlled airspace the controller assigns your circuit entry — you don't choose it.",
+    sourceRef: "VFRG Ch5 – Read-back requirements",
+  },
 
   // ------------------------------------------------------------------ 6. CIRCUIT
   {
     id: "circuit-crosswind",
     phase: "circuit",
+    aerodromeTypes: CTAF,
     title: "Crosswind broadcast",
     position: "crosswind",
     situation: "You are {callsign}, turning crosswind for runway {runway} at {aerodrome} (CTAF). Make your broadcast.",
@@ -346,8 +408,9 @@ export const SCENARIOS: ScenarioTemplate[] = [
     sourceRef: "VFRG Ch5 – CTAF procedures",
   },
   {
-    id: "circuit-downwind",
+    id: "circuit-downwind-ctaf",
     phase: "circuit",
+    aerodromeTypes: CTAF,
     title: "Downwind broadcast",
     position: "downwind",
     situation:
@@ -358,8 +421,23 @@ export const SCENARIOS: ScenarioTemplate[] = [
     sourceRef: "VFRG Ch5 – CTAF procedures",
   },
   {
+    id: "circuit-downwind-controlled",
+    phase: "circuit",
+    aerodromeTypes: TWR,
+    title: "Reporting downwind",
+    position: "downwind",
+    situation:
+      "Tower has asked you to report downwind. You are {callsign}, now downwind for runway {runway} at {aerodrome}, for a touch-and-go. Make the report.",
+    modelCall: "{callsign}, downwind, touch and go",
+    requiredElements: ["{callsign}", "downwind", "touch and go"],
+    notes:
+      "On a tower frequency the controller already knows which field and runway you're on — reports are shorter than a CTAF broadcast.",
+    sourceRef: "VFRG Ch5 – Radio procedures at controlled aerodromes",
+  },
+  {
     id: "circuit-base",
     phase: "circuit",
+    aerodromeTypes: CTAF,
     title: "Base broadcast",
     position: "base",
     situation: "You are {callsign}, turning base for runway {runway} at {aerodrome} (CTAF). Make your broadcast.",
@@ -368,8 +446,9 @@ export const SCENARIOS: ScenarioTemplate[] = [
     sourceRef: "VFRG Ch5 – CTAF procedures",
   },
   {
-    id: "circuit-final",
+    id: "circuit-final-ctaf",
     phase: "circuit",
+    aerodromeTypes: CTAF,
     title: "Final broadcast",
     position: "final",
     situation:
@@ -378,11 +457,24 @@ export const SCENARIOS: ScenarioTemplate[] = [
     requiredElements: ["{aerodrome}", "traffic", "{callsign}", "final", "runway {runway}", "full stop"],
     sourceRef: "VFRG Ch5 – CTAF procedures",
   },
+  {
+    id: "circuit-final-controlled",
+    phase: "circuit",
+    aerodromeTypes: TWR,
+    title: "Reporting final",
+    position: "final",
+    situation:
+      "Tower has asked you to report final. You are {callsign}, now on final for runway {runway} at {aerodrome}. Make the report.",
+    modelCall: "{callsign}, final",
+    requiredElements: ["{callsign}", "final"],
+    sourceRef: "VFRG Ch5 – Radio procedures at controlled aerodromes",
+  },
 
   // ------------------------------------------------------------------ 7. LANDING
   {
     id: "landing-readback",
     phase: "landing",
+    aerodromeTypes: TWR,
     title: "Reading back a landing clearance",
     position: "final",
     situation: 'Tower says: "{callsign}, wind {wind}, runway {runway}, cleared to land." Read it back.',
@@ -391,8 +483,9 @@ export const SCENARIOS: ScenarioTemplate[] = [
     sourceRef: "VFRG Ch5 – Read-back requirements",
   },
   {
-    id: "landing-clear-of-runway",
+    id: "landing-clear-of-runway-ctaf",
     phase: "landing",
+    aerodromeTypes: CTAF,
     title: "Clear of the runway",
     position: "clear-of-runway",
     situation:
@@ -402,40 +495,55 @@ export const SCENARIOS: ScenarioTemplate[] = [
     notes: "This call tells following traffic the runway is available again — don't forget it.",
     sourceRef: "VFRG Ch5 – CTAF procedures",
   },
+  {
+    id: "landing-taxi-instructions",
+    phase: "landing",
+    aerodromeTypes: TWR,
+    title: "Reading back taxi instructions after landing",
+    position: "clear-of-runway",
+    situation:
+      'You are {callsign}, clear of runway {runway} at {aerodrome}. Ground says: "{callsign}, taxi to the general aviation apron via taxiway bravo." Read it back.',
+    modelCall: "Taxi to the general aviation apron via bravo, {callsign}",
+    requiredElements: ["taxi", "apron", "bravo", "{callsign}"],
+    sourceRef: "VFRG Ch5 – Read-back requirements",
+  },
 
   // ------------------------------------------------------------- GENERAL PHRASES
   {
     id: "general-say-again",
     phase: "general",
+    aerodromeTypes: BOTH,
     title: "Requesting a repeat",
     position: "overhead",
-    situation: "You did not catch part of a transmission from {aerodrome} Tower. Ask them to repeat it.",
-    modelCall: "{aerodrome} Tower, {callsign}, say again",
-    requiredElements: ["say again", "{callsign}"],
+    situation: "You did not catch part of a transmission from {aerodrome} {station}. Ask them to repeat it.",
+    modelCall: "{aerodrome} {station}, {callsign}, say again",
+    requiredElements: ["{aerodrome}", "{station}", "{callsign}", "say again"],
     sourceRef: "VFRG Ch5 – Standard words and phrases",
   },
   {
     id: "general-standby",
     phase: "general",
+    aerodromeTypes: BOTH,
     title: "Acknowledging with STANDBY",
     position: "overhead",
-    situation: "ATC calls you but you are mid-checklist and not ready to copy a message. Tell them to standby.",
+    situation: "You are called but are mid-checklist and not ready to copy a message. Tell them to standby.",
     modelCall: "{callsign}, standby",
     requiredElements: ["standby", "{callsign}"],
     notes: "STANDBY means wait and I will call you — it is not an acknowledgement of the message.",
     sourceRef: "VFRG Ch5 – Standard words and phrases",
   },
 
-  // ---------------------------------------------------------------- EMERGENCY
+  // ------------------------------------------------------------------- EMERGENCY
   {
     id: "emergency-pan",
     phase: "emergency",
+    aerodromeTypes: BOTH,
     title: "PAN PAN call (urgency)",
     position: "bearing",
     situation:
       "You are {callsign}, a {aircraftType} with {pob} persons on board. Your engine is running rough but still producing partial power — urgent, but not yet a distress. You are at {altitude} feet, {distanceNm} NM {compass} of {aerodrome}, diverting to land. Make your urgency call.",
     modelCall:
-      "Pan pan, pan pan, pan pan, {aerodrome} Traffic, {callsign}, {aircraftType}, rough running engine, {distanceNm} miles {compass}, {altitude}, {pob} persons on board, diverting to {aerodrome}",
+      "Pan pan, pan pan, pan pan, {aerodrome} {station}, {callsign}, rough running engine, {distanceNm} miles {compass}, {altitude}, {pob} persons on board, diverting to {aerodrome}",
     requiredElements: [
       "pan pan",
       "{callsign}",
@@ -451,12 +559,13 @@ export const SCENARIOS: ScenarioTemplate[] = [
   {
     id: "emergency-mayday",
     phase: "emergency",
+    aerodromeTypes: BOTH,
     title: "MAYDAY call (distress)",
     position: "bearing",
     situation:
       "You are {callsign}, a {aircraftType} with {pob} persons on board. Your engine has failed completely and you are forced-landing from {altitude} feet, {distanceNm} NM {compass} of {aerodrome}. Make your distress call.",
     modelCall:
-      "Mayday, mayday, mayday, {aerodrome} Traffic, {callsign}, {aircraftType}, engine failure, forced landing, {distanceNm} miles {compass} of {aerodrome}, {altitude}, {pob} persons on board",
+      "Mayday, mayday, mayday, {aerodrome} {station}, {callsign}, engine failure, forced landing, {distanceNm} miles {compass} of {aerodrome}, {altitude}, {pob} persons on board",
     requiredElements: [
       "mayday",
       "{callsign}",
@@ -470,8 +579,3 @@ export const SCENARIOS: ScenarioTemplate[] = [
     sourceRef: "VFRG Ch5 – Emergency phraseology / ICAO Doc 4444",
   },
 ];
-
-/** Scenarios for a phase, in sequence order. */
-export function scenariosForPhase(phase: PhaseId): ScenarioTemplate[] {
-  return SCENARIOS.filter((s) => s.phase === phase);
-}

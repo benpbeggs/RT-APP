@@ -1,22 +1,23 @@
 import { useMemo, useState } from "react";
-import { PHASES } from "../data/phraseology";
+import { AERODROME_TYPE_LABELS, PHASES, type AerodromeType } from "../data/phraseology";
 import { generateValues, renderScenario, scenariosInScope } from "../lib/scenario";
 import { speak, speechSupported } from "../lib/speech";
 import { AircraftDiagram } from "./AircraftDiagram";
 
 export function ReferenceMode() {
+  const [aerodromeType, setAerodromeType] = useState<AerodromeType>("ctaf");
   const [query, setQuery] = useState("");
   // One consistent example aircraft across the whole reference, so the calls
   // read as a single flight rather than a jumble of unrelated registrations.
-  const values = useMemo(() => generateValues(), []);
+  const values = useMemo(() => generateValues(aerodromeType), [aerodromeType]);
 
   const grouped = useMemo(
     () =>
       PHASES.map((phase) => ({
         phase,
-        items: scenariosInScope(phase.id).map((t) => renderScenario(t, values)),
+        items: scenariosInScope(phase.id, aerodromeType).map((t) => renderScenario(t, values)),
       })),
-    [values],
+    [values, aerodromeType],
   );
 
   const q = query.trim().toLowerCase();
@@ -36,6 +37,17 @@ export function ReferenceMode() {
   return (
     <div className="mode-panel">
       <div className="filters">
+        <select
+          value={aerodromeType}
+          aria-label="Aerodrome type"
+          onChange={(e) => setAerodromeType(e.target.value as AerodromeType)}
+        >
+          {(Object.keys(AERODROME_TYPE_LABELS) as AerodromeType[]).map((t) => (
+            <option key={t} value={t}>
+              {AERODROME_TYPE_LABELS[t]}
+            </option>
+          ))}
+        </select>
         <input
           type="search"
           placeholder="Search calls…"

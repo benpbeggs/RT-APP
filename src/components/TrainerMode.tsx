@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PHASES, PHASE_BY_ID, type PhaseId } from "../data/phraseology";
+import {
+  AERODROME_TYPE_LABELS,
+  PHASES,
+  PHASE_BY_ID,
+  type AerodromeType,
+  type PhaseId,
+} from "../data/phraseology";
 import {
   generateValues,
   renderScenario,
@@ -20,10 +26,11 @@ import { AircraftDiagram } from "./AircraftDiagram";
 type Scope = PhaseId | "all";
 
 export function TrainerMode() {
+  const [aerodromeType, setAerodromeType] = useState<AerodromeType>("ctaf");
   const [scope, setScope] = useState<Scope>("all");
   const [index, setIndex] = useState(0);
   // One aircraft and aerodrome for the whole flight, so the sequence hangs together.
-  const [values, setValues] = useState<GeneratedValues>(() => generateValues());
+  const [values, setValues] = useState<GeneratedValues>(() => generateValues("ctaf"));
 
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState<ScoreResult | null>(null);
@@ -35,9 +42,15 @@ export function TrainerMode() {
   // Text already in the box when the mic opened, so dictation appends.
   const baseAnswerRef = useRef("");
 
-  const templates = useMemo(() => scenariosInScope(scope), [scope]);
+  const templates = useMemo(
+    () => scenariosInScope(scope, aerodromeType),
+    [scope, aerodromeType],
+  );
   const current = useMemo(
-    () => renderScenario(templates[Math.min(index, templates.length - 1)], values),
+    () =>
+      templates.length === 0
+        ? null
+        : renderScenario(templates[Math.min(index, templates.length - 1)], values),
     [templates, index, values],
   );
 
@@ -71,9 +84,17 @@ export function TrainerMode() {
     setIndex(0);
   }
 
+  function changeAerodromeType(next: AerodromeType) {
+    reset();
+    setAerodromeType(next);
+    // The aerodrome and who you're calling both change with the field type.
+    setValues(generateValues(next));
+    setIndex(0);
+  }
+
   function newFlight() {
     reset();
-    setValues(generateValues());
+    setValues(generateValues(aerodromeType));
     setIndex(0);
   }
 
@@ -112,9 +133,13 @@ export function TrainerMode() {
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!answer.trim()) return;
+    if (!answer.trim() || !current) return;
     stopListening();
     setResult(scoreAnswer(answer, current.requiredElements));
+  }
+
+  if (!current) {
+    return <p className="empty">No calls for this phase at a {AERODROME_TYPE_LABELS[aerodromeType]} aerodrome.</p>;
   }
 
   const phase = PHASE_BY_ID[current.template.phase];
@@ -123,7 +148,22 @@ export function TrainerMode() {
   return (
     <div className="mode-panel">
       <div className="filters">
-        <select value={scope} onChange={(e) => changeScope(e.target.value as Scope)}>
+        <select
+          value={aerodromeType}
+          aria-label="Aerodrome type"
+          onChange={(e) => changeAerodromeType(e.target.value as AerodromeType)}
+        >
+          {(Object.keys(AERODROME_TYPE_LABELS) as AerodromeType[]).map((t) => (
+            <option key={t} value={t}>
+              {AERODROME_TYPE_LABELS[t]}
+            </option>
+          ))}
+        </select>
+        <select
+          value={scope}
+          aria-label="Phase of flight"
+          onChange={(e) => changeScope(e.target.value as Scope)}
+        >
           <option value="all">Full flight — every call in order</option>
           {PHASES.map((p) => (
             <option key={p.id} value={p.id}>

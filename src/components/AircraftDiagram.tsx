@@ -163,6 +163,8 @@ export function AircraftDiagram({ position, values }: Props) {
     ? `${values.distanceNm} NM ${values.compass}`
     : CIRCUIT_SPOTS[circuitPosition].label;
 
+  const fieldType = values.aerodromeType === "ctaf" ? "CTAF" : "TWR";
+
   return (
     <figure className="diagram">
       {isArea ? <AreaView values={values} /> : <CircuitView position={circuitPosition} />}
@@ -170,8 +172,8 @@ export function AircraftDiagram({ position, values }: Props) {
         <span className="dg-caption-pos">{caption}</span>
         <span className="dg-caption-field">
           {isArea
-            ? `${values.aerodrome} · area view`
-            : `${values.aerodrome} · RWY ${values.runway} · left-hand circuit`}
+            ? `${values.aerodrome} ${fieldType} · area view`
+            : `${values.aerodrome} ${fieldType} · RWY ${values.runway}`}
         </span>
       </figcaption>
     </figure>
