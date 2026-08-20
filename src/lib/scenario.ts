@@ -1,5 +1,6 @@
 import type { AerodromeType, PhaseId, PositionKind, ScenarioTemplate } from "../data/phraseology";
 import { SCENARIOS } from "../data/phraseology";
+import type { SpokenCall } from "./radio";
 
 // Illustrative field names only — airspace classification changes, so the app
 // never asserts that a given aerodrome is towered today. See ACCURACY_DISCLAIMER.
@@ -9,12 +10,45 @@ const AERODROMES: Record<AerodromeType, string[]> = {
 };
 
 const AIRCRAFT_TYPES = ["Cessna 172", "Piper Warrior", "Diamond DA40", "Jabiru"];
+
+// Every value that can appear in a call is voiced by its own recorded clip, so
+// these are deliberately fixed, modest pools rather than open ranges: the
+// variety is what makes practice worthwhile, the exact spread is not.
+export const REGISTRATIONS = ["ABC", "DKM", "FQZ", "JTR", "PWL", "SYV"];
 const RUNWAYS = ["18", "25", "07", "36", "22", "04"];
 const WINDS = ["180 at 10", "250 at 8", "070 at 12", "360 at 6"];
 const COMPASS = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];
 const CIRCUIT_LEGS = ["crosswind", "downwind", "base"];
+const QNHS = ["1008", "1011", "1013", "1016", "1019", "1021", "1024"];
+const DISTANCES = ["2", "3", "5", "7", "8", "10", "12", "14"];
+const ALTITUDES = ["1500", "2500", "3500", "4500"];
+const ETA_MINUTES = ["3", "5", "8", "10", "12", "15"];
+const POBS = ["1", "2", "3"];
 
-const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+/** Callsigns are type plus registration — "Cessna VH-ABC". */
+export function callsignFor(aircraftType: string, registration: string): string {
+  return `${aircraftType.split(" ")[0]} VH-${registration}`;
+}
+
+/** Every callsign the app can produce, for the phrase bank to render. */
+export const ALL_CALLSIGNS = AIRCRAFT_TYPES.flatMap((type) =>
+  REGISTRATIONS.map((reg) => callsignFor(type, reg)),
+);
+
+/** The full value space of each slot, shared with the phrase-bank build. */
+export const SLOT_VALUES: Record<string, string[]> = {
+  aerodrome: [...AERODROMES.ctaf, ...AERODROMES.controlled],
+  callsign: ALL_CALLSIGNS,
+  station: ["Traffic", "Tower"],
+  runway: RUNWAYS,
+  qnh: QNHS,
+  compass: COMPASS,
+  distanceNm: DISTANCES,
+  altitude: ALTITUDES,
+  circuitLeg: CIRCUIT_LEGS,
+  etaMin: ETA_MINUTES,
+  pob: POBS,
+};
 
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -41,23 +75,21 @@ export interface GeneratedValues {
 /** One consistent aircraft/aerodrome set, reused across a whole flight sequence. */
 export function generateValues(aerodromeType: AerodromeType = "ctaf"): GeneratedValues {
   const aircraftType = pick(AIRCRAFT_TYPES);
-  let suffix = "";
-  for (let i = 0; i < 3; i++) suffix += pick(LETTERS.split(""));
   return {
     aerodromeType,
-    callsign: `${aircraftType.split(" ")[0]} VH-${suffix}`,
+    callsign: callsignFor(aircraftType, pick(REGISTRATIONS)),
     aircraftType,
     aerodrome: pick(AERODROMES[aerodromeType]),
     station: aerodromeType === "ctaf" ? "Traffic" : "Tower",
     runway: pick(RUNWAYS),
     wind: pick(WINDS),
-    qnh: String(1005 + Math.floor(Math.random() * 21)),
+    qnh: pick(QNHS),
     compass: pick(COMPASS),
-    distanceNm: String(2 + Math.floor(Math.random() * 13)),
-    altitude: `${1 + Math.floor(Math.random() * 4)}500`,
+    distanceNm: pick(DISTANCES),
+    altitude: pick(ALTITUDES),
     circuitLeg: pick(CIRCUIT_LEGS),
-    etaMin: String(3 + Math.floor(Math.random() * 12)),
-    pob: String(1 + Math.floor(Math.random() * 3)),
+    etaMin: pick(ETA_MINUTES),
+    pob: pick(POBS),
   };
 }
 
@@ -224,6 +256,8 @@ export interface RenderedScenario {
   requiredElements: string[];
   /** Position with "circuit-leg" resolved to the generated leg. */
   position: PositionKind;
+  /** Everything the audio player needs to speak this call. */
+  call: SpokenCall;
 }
 
 function resolvePosition(template: ScenarioTemplate, values: GeneratedValues): PositionKind {
@@ -237,13 +271,19 @@ export function renderScenario(
   template: ScenarioTemplate,
   values: GeneratedValues = generateValues(),
 ): RenderedScenario {
+  const modelCall = fill(template.modelCall, values);
   return {
     template,
     values,
     situation: fill(template.situation, values),
-    modelCall: fill(template.modelCall, values),
+    modelCall,
     requiredElements: template.requiredElements.map((e) => fill(e, values)),
     position: resolvePosition(template, values),
+    call: {
+      text: modelCall,
+      template: template.modelCall,
+      values: values as unknown as Record<string, string>,
+    },
   };
 }
 

@@ -15,7 +15,7 @@
 
 import bankAudioUrl from "../assets/phrase-bank.wav?url";
 import bankIndexUrl from "../assets/phrase-bank.json?url";
-import { tokenize } from "./lexicon";
+import { clipsForCall } from "./lexicon";
 
 const STORAGE_KEY = "rt-app.radio-effects";
 
@@ -264,21 +264,32 @@ interface ResolvedClip {
 }
 
 /**
- * Resolve every token to a clip up front. Returning null before anything is
- * scheduled is what lets the caller fall back cleanly — a half-scheduled call
- * would otherwise play over the top of the synthesised one.
+ * A call to speak. The template and values are what the recorded bank plays
+ * from — it stitches whole phrases, so it needs to know where the slots are,
+ * not just the finished sentence. `text` is only for the fallback synthesiser.
  */
-function resolveClips(bank: PhraseBank, text: string): ResolvedClip[] | null {
-  const { spoken, missing } = tokenize(text);
-  if (missing.length > 0 || spoken.length === 0) return null;
+export interface SpokenCall {
+  text: string;
+  template: string;
+  values: Record<string, string>;
+}
+
+/**
+ * Resolve every segment of the call to a clip up front. Returning null before
+ * anything is scheduled is what lets the caller fall back cleanly — a
+ * half-scheduled call would otherwise play over the synthesised one.
+ */
+function resolveClips(bank: PhraseBank, call: SpokenCall): ResolvedClip[] | null {
+  const { segments, missing } = clipsForCall(call.template, call.values);
+  if (missing.length > 0 || segments.length === 0) return null;
 
   const resolved: ResolvedClip[] = [];
-  for (const { token, pauseAfter } of spoken) {
-    const clip = bank.clips[token];
-    if (!clip) return null;
+  for (const { clip, pauseAfter } of segments) {
+    const entry = bank.clips[clip];
+    if (!entry) return null;
     resolved.push({
-      offset: clip[0] / bank.sampleRate,
-      duration: clip[1] / bank.sampleRate,
+      offset: entry[0] / bank.sampleRate,
+      duration: entry[1] / bank.sampleRate,
       pauseAfter,
     });
   }
@@ -323,7 +334,7 @@ function scheduleClips(
  * never silently dropped. With effects off it is always plain, clearly-spoken
  * synthesis, which is easier to learn the wording from.
  */
-export function transmit(text: string): void {
+export function transmit(call: SpokenCall): void {
   stopTransmission();
 
   const ctx = effectsEnabled ? getContext() : null;
@@ -331,19 +342,19 @@ export function transmit(text: string): void {
     const mine = generation;
     void loadBank(ctx).then((bank) => {
       if (mine !== generation) return;
-      if (bank && playRecorded(ctx, bank, text)) return;
-      speakFallback(text);
+      if (bank && playRecorded(ctx, bank, call)) return;
+      speakFallback(call.text);
     });
     return;
   }
 
-  speakFallback(text);
+  speakFallback(call.text);
 }
 
 /** The recorded path: clips through the offline-filtered bank, plus artefacts. */
-function playRecorded(ctx: AudioContext, bank: PhraseBank, text: string): boolean {
+function playRecorded(ctx: AudioContext, bank: PhraseBank, call: SpokenCall): boolean {
   // Resolve before making a sound, so a miss falls back cleanly.
-  const clips = resolveClips(bank, text);
+  const clips = resolveClips(bank, call);
   if (!clips) return false;
 
   const mine = generation;

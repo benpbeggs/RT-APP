@@ -40,19 +40,37 @@ authentic for a signal band-limited to 2.9 kHz, and it halves the file. Measured
 the bank's energy sits inside the passband.
 
 Because calls are generated — the callsign, aerodrome, runway, altitude and distance all vary —
-whole sentences cannot be pre-recorded. Instead each **token** is recorded once and sentences are
-assembled at playback, the way automated aeronautical audio (ATIS and the like) is built:
+whole sentences cannot be pre-recorded. But calls are not free-form either: each is a template
+with a few slots, and everything between the slots is fixed wording. So the bank records **whole
+phrases**, and playback stitches those larger pieces together:
 
-- `src/lib/lexicon.ts` is the single source of truth: the token list, and the `tokenize()` that
-  turns a call into clips. Registrations become phonetics (`VH-ABC` → victor hotel alpha bravo
-  charlie) and numbers take aviation forms — `13` reads digit-by-digit ("one three") while `2500`
-  groups ("two thousand five hundred").
-- `npm run build:audio` renders every token with Piper and packs them into one WAV sprite
-  (`src/assets/phrase-bank.wav`, 116 clips, 86 s, 1.3 MB) plus a JSON index of offsets. The app
-  fetches it once, decodes it once, and slices clips out at playback.
-- `npm run check:audio` proves every call the app can generate is fully speakable — it sweeps all
-  9,300 combinations of scenario and vocabulary and fails on any token the bank lacks. **Run it
-  after touching any model call**, then rebuild the bank if it reports a gap.
+- Each run of fixed wording between two slots is one clip — "taxiing runway", "cleared for
+  takeoff", "engine failure forced landing".
+- Each possible slot value is one clip, spoken right through — a callsign is a single recording of
+  "Cessna victor hotel alpha bravo charlie", not six letters glued together.
+
+That granularity is the point. An earlier version recorded one clip per word and spelled callsigns
+letter by letter, and it sounded like a list being read out however good the voice was. Phrases
+carry their own rhythm; single words have none to carry. It is also why the value pools in
+`src/lib/scenario.ts` are fixed and modest rather than open ranges — every value needs a recording,
+and random three-letter registrations would mean 17,576 of them per aircraft type.
+
+- `src/lib/lexicon.ts` is the single source of truth: `segmentTemplate()` splits a call into
+  literals and slots (on commas first, so each comma becomes a real pause), `spokenValue()` gives
+  the spoken form of a slot value — registrations become phonetics, `2500` groups as "two thousand
+  five hundred", runways and QNH go digit by digit — and `ALL_CLIPS` is what the bank must hold.
+- `npm run build:audio` renders every clip with Piper and packs them into one WAV sprite
+  (`src/assets/phrase-bank.wav`) plus a JSON index of offsets. The app fetches it once, decodes it
+  once, and slices clips out at playback.
+- `npm run check:audio` proves every call the app can generate is fully speakable — it sweeps every
+  scenario against every slot value, fails on any clip the bank lacks, and also fails if the
+  rendered bank on disk has drifted from what the lexicon expects. **Run it after touching any
+  model call or value pool**, then rebuild the bank if it reports staleness.
+
+Each clip is also rendered with mid-sentence prosody where possible: spoken alone, a phrase ends on
+a falling contour, so the build says it twice ("phrase, phrase.") and keeps the first half, leaving
+the fall on the discarded copy. The build reports which clips could not be split cleanly and so
+kept their standalone rendering.
 
 ### The voice
 

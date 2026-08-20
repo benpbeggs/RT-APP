@@ -80,7 +80,7 @@ export function ReferenceMode() {
                       <span className="label">Model call</span>
                       <p>“{r.modelCall}”</p>
                       {transmitSupported() && (
-                        <button className="ghost-btn" onClick={() => transmit(r.modelCall)}>
+                        <button className="ghost-btn" onClick={() => transmit(r.call)}>
                           ▶ Listen
                         </button>
                       )}

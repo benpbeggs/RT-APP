@@ -256,7 +256,7 @@ export function TrainerMode() {
               <span className="label">Model call</span>
               <p>“{current.modelCall}”</p>
               {transmitSupported() && (
-                <button className="ghost-btn" type="button" onClick={() => transmit(current.modelCall)}>
+                <button className="ghost-btn" type="button" onClick={() => transmit(current.call)}>
                   ▶ Listen
                 </button>
               )}

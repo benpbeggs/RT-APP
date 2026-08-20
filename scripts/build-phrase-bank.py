@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Render the phrase bank: one recorded clip per token, packed into a sprite.
+"""Render the phrase bank: one recorded clip per phrase, packed into a sprite.
 
-Each token in src/lib/lexicon.ts is spoken by a neural TTS voice, put through a
+Each clip in src/lib/lexicon.ts is spoken by a neural TTS voice, put through a
 VHF-comms processing chain, resampled to 8 kHz and packed into a single WAV
 with a JSON index of sample offsets. The app fetches one file, decodes it once
 and slices clips out of it at playback.
@@ -14,7 +14,11 @@ The voice is Piper (a neural TTS) rather than a formant synthesiser, which is
 what stops it sounding robotic. The model is LibriTTS, trained on 904 real
 speakers; the speaker below was chosen by measurement — see check-voice.py.
 
-Usage: python3 scripts/build-phrase-bank.py tokens.json out.wav out.json
+Clips are whole phrases — a run of fixed wording, or one slot value spoken
+right through — not single words, which is what lets assembled calls carry a
+natural rhythm.
+
+Usage: python3 scripts/build-phrase-bank.py clips.json out.wav out.json
 """
 
 import json
@@ -132,12 +136,12 @@ def quiet_runs(x: np.ndarray, floor: float, smooth: float) -> list[tuple[int, in
 
 def split_carrier(x: np.ndarray, solo_length: int) -> np.ndarray | None:
     """
-    Cut "token, token." at the comma and return the first half.
+    Cut "phrase, phrase." at the comma and return the first half.
 
-    The comma pause is short and varies with the token, so this tries
+    The comma pause is short and varies with the phrase, so this tries
     progressively higher silence floors. Two checks reject a bad cut: the
-    halves must be about equal, and each must be about as long as the token
-    rendered on its own — without the second check, a multi-word token can be
+    halves must be about equal, and each must be about as long as the phrase
+    rendered on its own — without the second check, a multi-word phrase can be
     split inside itself, leaving one "half" holding a repetition and a bit.
     """
     span = speech_span(x)
@@ -161,17 +165,17 @@ def split_carrier(x: np.ndarray, solo_length: int) -> np.ndarray | None:
     return None
 
 
-def synthesise_token(voice, text: str) -> tuple[np.ndarray, bool]:
+def synthesise_clip(voice, text: str) -> tuple[np.ndarray, bool]:
     """
-    Render a token with mid-sentence prosody where possible.
+    Render a clip with mid-sentence prosody where possible.
 
     Spoken alone, every clip ends on a falling contour, and stringing those
     together is what makes assembled speech sound like a list being read out
-    rather than a person talking. Saying the token twice and keeping the first
+    rather than a person talking. Saying the phrase twice and keeping the first
     gives a version whose fall lands on the discarded copy instead.
 
     Returns the clip and whether the carrier worked; when the repetitions
-    cannot be separated cleanly the token keeps its standalone rendering,
+    cannot be separated cleanly the clip keeps its standalone rendering,
     which is merely less natural, not wrong.
     """
     solo = synthesise(voice, text)
@@ -275,8 +279,8 @@ def process(x: np.ndarray) -> np.ndarray:
 
 def main() -> int:
     tokens_path, wav_path, index_path = (Path(p) for p in sys.argv[1:4])
-    # [[token id, text to synthesise], ...] — they differ where espeak needs
-    # a respelling to pronounce the token correctly.
+    # [[clip id, text to synthesise], ...] — they differ for slot clips, whose id
+    # encodes the slot and value while the text is how it is actually said.
     jobs = json.loads(tokens_path.read_text())
     tokens = [job[0] for job in jobs]
 
@@ -285,7 +289,7 @@ def main() -> int:
     clips: dict[str, np.ndarray] = {}
     standalone: list[str] = []
     for i, (token, spoken_as) in enumerate(jobs, 1):
-        raw, carried = synthesise_token(voice, spoken_as)
+        raw, carried = synthesise_clip(voice, spoken_as)
         clips[token] = process(raw)
         if not carried:
             standalone.append(token)

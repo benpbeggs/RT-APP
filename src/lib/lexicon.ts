@@ -1,16 +1,23 @@
-// The spoken lexicon: how a written model call becomes a sequence of recorded
-// phrase-bank clips.
+// How a call becomes recorded audio.
 //
-// Calls are generated, not fixed — the callsign, aerodrome, runway, altitude
-// and distance all vary — so whole sentences cannot be pre-recorded. Instead
-// every *token* is recorded once and the sentence is assembled at playback,
-// which is how automated aeronautical audio (ATIS and the like) is built.
+// Calls are generated, so whole sentences cannot be pre-recorded — but they are
+// not free-form either. Each one is a template with a handful of slots, and
+// everything between the slots is fixed wording. So the bank records the fixed
+// wording in whole phrases ("taxiing runway", "cleared for takeoff") and one
+// clip per possible slot value ("Cessna VH-ABC" spoken right through), and
+// playback stitches those larger pieces together.
 //
-// This module is the single source of truth for that vocabulary. The build
-// script (scripts/build-phrase-bank.mjs) reads TOKENS from here to decide what
-// to render, and the player (lib/radio.ts) uses tokenize() to decide what to
-// play. Keeping both on one list is what stops the bank and the calls drifting
-// apart.
+// That granularity is the point. An earlier version recorded one clip per word
+// and spelled callsigns letter by letter, which sounded like a list being read
+// out however good the voice was. Phrases carry their own rhythm; single words
+// have none to carry.
+//
+// This module is the single source of truth for the bank's contents:
+// scripts/build-phrase-bank.mjs reads ALL_CLIPS to decide what to render, and
+// lib/radio.ts calls clipsForCall() to decide what to play.
+
+import { SCENARIOS } from "../data/phraseology";
+import { SLOT_VALUES } from "./scenario";
 
 /** Spoken forms of the phonetic alphabet, keyed by letter. */
 export const PHONETIC_ALPHABET: Record<string, string> = {
@@ -21,188 +28,163 @@ export const PHONETIC_ALPHABET: Record<string, string> = {
   x: "xray", y: "yankee", z: "zulu",
 };
 
-/** Aviation digit names. Nine is "niner" on the air; three and five are plain. */
-export const DIGIT_WORDS = [
+/** Aviation digit names. Nine is "niner" on the air. */
+const DIGIT_WORDS = [
   "zero", "one", "two", "three", "four",
   "five", "six", "seven", "eight", "niner",
 ];
 
 /**
- * Multi-word phrases, longest first so "clear of runway" wins over "runway"
- * and "cleared for takeoff" is never split. Order matters here.
- */
-export const PHRASES: string[] = [
-  "request traffic information",
-  "departing the circuit to the",
-  "general aviation apron",
-  "estimating next position",
-  "frequency change approved",
-  "tracking training area",
-  "rough running engine",
-  "training area",
-  "persons on board",
-  "cleared for takeoff",
-  "information alpha",
-  "information bravo",
-  "clear of runway",
-  "entering runway",
-  "cleared to land",
-  "forced landing",
-  "engine failure",
-  "request taxi",
-  "holding point",
-  "touch and go",
-  "radio check",
-  "north-east",
-  "north-west",
-  "south-east",
-  "south-west",
-  "full stop",
-  "say again",
-  "pan pan",
-  "line up",
-  "mayday",
-];
-
-/** Single words used across the calls. */
-export const WORDS: string[] = [
-  "traffic", "tower", "ground", "runway", "taxiing", "taxi", "airborne",
-  "inbound", "joining", "join", "crosswind", "downwind", "base", "final",
-  "climbing", "diverting", "ready", "standby", "miles", "minutes",
-  "north", "south", "east", "west", "qnh", "thousand", "hundred",
-  "for", "landing", "to", "of", "via", "the",
-];
-
-/** Aerodrome names, matching the two lists in lib/scenario.ts. */
-export const AERODROME_WORDS: string[] = [
-  "cessnock", "goulburn", "temora", "mangalore", "warwick", "latrobe", "valley",
-  "bankstown", "moorabbin", "archerfield", "jandakot", "parafield", "camden",
-];
-
-/** Aircraft manufacturers, which lead every callsign. */
-export const AIRCRAFT_WORDS: string[] = ["cessna", "piper", "diamond", "jabiru"];
-
-/** Every clip the phrase bank must contain. */
-export const TOKENS: string[] = [
-  ...new Set([
-    ...Object.values(PHONETIC_ALPHABET),
-    ...DIGIT_WORDS,
-    ...PHRASES,
-    ...WORDS,
-    ...AERODROME_WORDS,
-    ...AIRCRAFT_WORDS,
-  ]),
-];
-
-/**
- * Respellings for tokens the synthesiser gets wrong. The key is the token id;
- * the value is what gets fed to espeak-ng when rendering that clip. Checked
- * with `espeak-ng -x -q <text>` to see the phonemes it produces.
+ * Respellings for anything the synthesiser gets wrong. Keyed by the text that
+ * would otherwise be spoken.
  */
 export const PRONUNCIATIONS: Record<string, string> = {
   // Default stresses the first syllable ("LAT-robe"); it is "luh-TROBE".
-  latrobe: "la-trobe",
+  "latrobe valley": "la-trobe valley",
 };
 
-/** A clip id plus how long to pause after it. */
-export interface SpokenToken {
-  token: string;
-  /** Extra pause in seconds after this clip — commas and full stops breathe. */
+const digits = (raw: string) => raw.split("").map((d) => DIGIT_WORDS[Number(d)]).join(" ");
+
+/**
+ * How a slot's value is said. Levels group into magnitudes the way a pilot
+ * reads them ("two thousand five hundred"); runways, QNH and distances go
+ * digit by digit, which is the standard and also how they are read back.
+ */
+export function spokenValue(slot: string, value: string): string {
+  switch (slot) {
+    case "callsign": {
+      // "Cessna VH-ABC" -> "Cessna victor hotel alpha bravo charlie"
+      const [type, registration] = value.split(" VH-");
+      const letters = ["v", "h", ...registration.toLowerCase().split("")]
+        .map((c) => PHONETIC_ALPHABET[c])
+        .join(" ");
+      return `${type} ${letters}`;
+    }
+    case "altitude": {
+      const n = Number(value);
+      const thousands = Math.floor(n / 1000);
+      const hundreds = (n % 1000) / 100;
+      const parts = [DIGIT_WORDS[thousands], "thousand"];
+      if (hundreds > 0) parts.push(DIGIT_WORDS[hundreds], "hundred");
+      return parts.join(" ");
+    }
+    case "runway":
+    case "qnh":
+    case "distanceNm":
+    case "etaMin":
+      return digits(value);
+    case "pob":
+      return DIGIT_WORDS[Number(value)];
+    default:
+      return value;
+  }
+}
+
+// ---------------------------------------------------------------- segmenting
+
+export interface CallSegment {
+  /** Clip id: the literal's text, or "slot:value" for a slot. */
+  clip: string;
+  /** Pause after this clip, in seconds. */
   pauseAfter: number;
 }
 
-// Clips are trimmed tight, so these are the whole gap between words. Kept
-// small: a uniform pause after every word is what makes assembled speech sound
-// like a list being read out. The longer one lands only at commas, where a
-// controller would actually draw breath.
+// Clips are trimmed tight, so these are the whole gap. The short one holds
+// words of a phrase together; the long one lands only where the written call
+// has a comma, which is where a controller actually draws breath.
 const WORD_GAP = 0.008;
 const COMMA_GAP = 0.13;
 
-/** "2500" -> ["two","thousand","five","hundred"]; "18" -> ["one","eight"]. */
-function speakNumber(raw: string): string[] {
-  const digits = raw.split("");
-
-  // Altitudes and QNH-style figures read as grouped magnitudes, not digits.
-  const value = Number(raw);
-  if (raw.length === 4 && value % 100 === 0 && value >= 1000) {
-    const thousands = Math.floor(value / 1000);
-    const hundreds = (value % 1000) / 100;
-    const out = [DIGIT_WORDS[thousands], "thousand"];
-    if (hundreds > 0) out.push(DIGIT_WORDS[hundreds], "hundred");
-    return out;
-  }
-
-  return digits.map((d) => DIGIT_WORDS[Number(d)]).filter(Boolean);
+/** Normalised clip id for a run of fixed wording. */
+export function literalClip(text: string): string {
+  return text.replace(/[,.]/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-/** "VH-ABC" -> ["victor","hotel","alpha","bravo","charlie"]. */
-function speakRegistration(raw: string): string[] {
-  return raw
-    .toLowerCase()
-    .replace(/[^a-z]/g, "")
-    .split("")
-    .map((c) => PHONETIC_ALPHABET[c])
-    .filter(Boolean);
-}
-
-const SORTED_PHRASES = [...PHRASES].sort((a, b) => b.length - a.length);
+export const slotClip = (slot: string, value: string) => `${slot}:${value}`;
 
 /**
- * Turn a rendered model call into the clips that speak it. Anything the
- * lexicon does not cover is returned in `missing`, so the player can fall back
- * to the speech synthesiser rather than transmit a call with holes in it.
+ * Break a template into the clips that speak it. Splitting on commas first
+ * means each comma becomes a real pause and everything inside one is a single
+ * recorded phrase rather than a string of separate words.
  */
-export function tokenize(text: string): { spoken: SpokenToken[]; missing: string[] } {
-  const spoken: SpokenToken[] = [];
+export function segmentTemplate(template: string): { clip: string; isSlot: boolean; endsPhrase: boolean }[] {
+  const out: { clip: string; isSlot: boolean; endsPhrase: boolean }[] = [];
+
+  const phrases = template.split(/[,.]/).map((p) => p.trim()).filter(Boolean);
+  phrases.forEach((phrase, phraseIndex) => {
+    const parts: { clip: string; isSlot: boolean }[] = [];
+    const pattern = /\{(\w+)\}/g;
+    let cursor = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(phrase))) {
+      const literal = literalClip(phrase.slice(cursor, match.index));
+      if (literal) parts.push({ clip: literal, isSlot: false });
+      parts.push({ clip: match[1], isSlot: true });
+      cursor = match.index + match[0].length;
+    }
+    const tail = literalClip(phrase.slice(cursor));
+    if (tail) parts.push({ clip: tail, isSlot: false });
+
+    parts.forEach((part, i) => {
+      out.push({
+        ...part,
+        endsPhrase: i === parts.length - 1 && phraseIndex < phrases.length - 1,
+      });
+    });
+  });
+
+  return out;
+}
+
+/** The clips that speak one filled-in call, in order. */
+export function clipsForCall(
+  template: string,
+  values: Record<string, string>,
+): { segments: CallSegment[]; missing: string[] } {
+  const segments: CallSegment[] = [];
   const missing: string[] = [];
 
-  // Split into comma/full-stop delimited groups so pauses land where a
-  // controller would actually pause.
-  const groups = text.split(/([,.])/).filter((s) => s.trim() !== "");
-
-  let pendingGap = WORD_GAP;
-  for (const group of groups) {
-    if (group === "," || group === ".") {
-      if (spoken.length > 0) spoken[spoken.length - 1].pauseAfter = COMMA_GAP;
-      continue;
-    }
-
-    let rest = group.trim().toLowerCase();
-    while (rest.length > 0) {
-      // Longest-match phrases first.
-      const phrase = SORTED_PHRASES.find(
-        (p) => rest === p || rest.startsWith(p + " ") || rest.startsWith(p + ","),
-      );
-      if (phrase) {
-        spoken.push({ token: phrase, pauseAfter: pendingGap });
-        rest = rest.slice(phrase.length).trim();
+  for (const part of segmentTemplate(template)) {
+    let clip: string;
+    if (part.isSlot) {
+      const value = values[part.clip];
+      if (value === undefined) {
+        missing.push(`{${part.clip}}`);
         continue;
       }
+      clip = slotClip(part.clip, value);
+    } else {
+      clip = part.clip;
+    }
+    segments.push({ clip, pauseAfter: part.endsPhrase ? COMMA_GAP : WORD_GAP });
+  }
 
-      const wordMatch = /^[^\s]+/.exec(rest);
-      if (!wordMatch) break;
-      const word = wordMatch[0];
-      rest = rest.slice(word.length).trim();
+  return { segments, missing };
+}
 
-      const clean = word.replace(/[^a-z0-9-]/g, "");
-      if (clean === "") continue;
+// ------------------------------------------------------------- bank contents
 
-      // Registrations, then bare numbers, then plain vocabulary.
-      let parts: string[];
-      if (/^vh-?[a-z]{3}$/.test(clean)) {
-        parts = speakRegistration(clean);
-      } else if (/^\d+$/.test(clean)) {
-        parts = speakNumber(clean);
-      } else {
-        parts = [clean];
-      }
+/** Every clip the phrase bank must hold, with the text to synthesise for it. */
+export function allClips(): { id: string; text: string }[] {
+  const clips = new Map<string, string>();
 
-      for (const part of parts) {
-        if (!TOKENS.includes(part)) missing.push(part);
-        spoken.push({ token: part, pauseAfter: WORD_GAP });
-      }
+  for (const scenario of SCENARIOS) {
+    for (const part of segmentTemplate(scenario.modelCall)) {
+      if (!part.isSlot) clips.set(part.clip, part.clip);
     }
   }
 
-  return { spoken, missing };
+  for (const [slot, values] of Object.entries(SLOT_VALUES)) {
+    for (const value of values) {
+      clips.set(slotClip(slot, value), spokenValue(slot, value));
+    }
+  }
+
+  return [...clips].map(([id, text]) => ({
+    id,
+    text: PRONUNCIATIONS[text.toLowerCase()] ?? text,
+  }));
 }
+
+export const ALL_CLIPS = allClips();

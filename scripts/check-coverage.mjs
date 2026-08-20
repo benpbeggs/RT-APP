@@ -1,95 +1,74 @@
 // Proves every call the app can generate is fully speakable from the phrase
-// bank. Exhaustive over the value vocabulary: for each scenario, each
-// placeholder is swept through every value it can take.
+// bank. Exhaustive: for each scenario, every slot is swept through every value
+// it can take, and every resulting clip must exist in the bank.
 //
-// Run with: npx vite-node scripts/check-coverage.mjs
+// Run with: npm run check:audio
 
+import { readFileSync } from "node:fs";
 import { SCENARIOS } from "../src/data/phraseology.ts";
-import { tokenize, TOKENS } from "../src/lib/lexicon.ts";
+import { ALL_CLIPS, clipsForCall, segmentTemplate } from "../src/lib/lexicon.ts";
+import { SLOT_VALUES } from "../src/lib/scenario.ts";
 
-// Mirrors the vocabulary in src/lib/scenario.ts.
-const VOCAB = {
-  aerodrome: [
-    "Cessnock", "Goulburn", "Temora", "Mangalore", "Warwick", "Latrobe Valley",
-    "Bankstown", "Moorabbin", "Archerfield", "Jandakot", "Parafield", "Camden",
-  ],
-  aircraftType: ["Cessna 172", "Piper Warrior", "Diamond DA40", "Jabiru"],
-  runway: ["18", "25", "07", "36", "22", "04"],
-  wind: ["180 at 10", "250 at 8", "070 at 12", "360 at 6"],
-  compass: [
-    "north", "north-east", "east", "south-east",
-    "south", "south-west", "west", "north-west",
-  ],
-  circuitLeg: ["crosswind", "downwind", "base"],
-  station: ["Traffic", "Tower"],
-  qnh: Array.from({ length: 21 }, (_, i) => String(1005 + i)),
-  distanceNm: Array.from({ length: 13 }, (_, i) => String(2 + i)),
-  altitude: ["1500", "2500", "3500", "4500"],
-  etaMin: Array.from({ length: 12 }, (_, i) => String(3 + i)),
-  pob: ["1", "2", "3"],
-  callsign: [],
-};
-
-// Every callsign the generator can produce is <type> VH-<3 letters>; the
-// letters are covered by sweeping the alphabet through each position.
-const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
-for (const type of VOCAB.aircraftType) {
-  const make = type.split(" ")[0];
-  for (const l of LETTERS) {
-    VOCAB.callsign.push(`${make} VH-${l}${l}${l}`);
-    VOCAB.callsign.push(`${make} VH-A${l}Z`);
-  }
-}
-
-const KEYS = Object.keys(VOCAB);
-
-function baseValues() {
-  return Object.fromEntries(KEYS.map((k) => [k, VOCAB[k][0]]));
-}
-
-function fill(template, values) {
-  return template.replace(/\{(\w+)\}/g, (_, k) => values[k] ?? `{${k}}`);
-}
-
-const missingTokens = new Set();
+const defined = new Set(ALL_CLIPS.map((c) => c.id));
+const used = new Set();
+const missing = new Set();
 const unresolved = new Set();
-const usedTokens = new Set();
 let calls = 0;
 
+const base = Object.fromEntries(Object.entries(SLOT_VALUES).map(([k, v]) => [k, v[0]]));
+
 for (const scenario of SCENARIOS) {
-  // Sweep each placeholder independently — every token appears in some call.
-  for (const key of KEYS) {
-    for (const value of VOCAB[key]) {
-      const values = { ...baseValues(), [key]: value };
-      const text = fill(scenario.modelCall, values);
+  // Reject a template referencing a slot with no value space at all.
+  for (const part of segmentTemplate(scenario.modelCall)) {
+    if (part.isSlot && !(part.clip in SLOT_VALUES)) {
+      unresolved.add(`${scenario.id}: {${part.clip}} has no values`);
+    }
+  }
+
+  for (const [slot, options] of Object.entries(SLOT_VALUES)) {
+    for (const option of options) {
+      const values = { ...base, [slot]: option };
+      const { segments, missing: gaps } = clipsForCall(scenario.modelCall, values);
       calls++;
-
-      const leftover = text.match(/\{[a-zA-Z]+\}/g);
-      if (leftover) leftover.forEach((p) => unresolved.add(`${scenario.id}: ${p}`));
-
-      const { spoken, missing } = tokenize(text);
-      missing.forEach((m) => missingTokens.add(m));
-      spoken.forEach((s) => usedTokens.add(s.token));
+      gaps.forEach((g) => unresolved.add(`${scenario.id}: ${g}`));
+      for (const { clip } of segments) {
+        used.add(clip);
+        if (!defined.has(clip)) missing.add(clip);
+      }
     }
   }
 }
 
 console.log(`Checked ${calls} generated calls across ${SCENARIOS.length} scenarios.`);
-console.log(`Bank defines ${TOKENS.length} tokens; calls use ${usedTokens.size}.`);
+console.log(`Bank defines ${defined.size} clips; calls use ${used.size}.`);
 
-const unused = TOKENS.filter((t) => !usedTokens.has(t));
-if (unused.length) console.log(`\nDefined but never spoken (${unused.length}):`, unused.join(", "));
+const unused = [...defined].filter((c) => !used.has(c));
+if (unused.length) console.log(`\nDefined but never spoken (${unused.length}): ${unused.join(", ")}`);
 
 if (unresolved.size) {
-  console.log(`\nUNRESOLVED PLACEHOLDERS:`);
+  console.log(`\nUNRESOLVED SLOTS:`);
   [...unresolved].forEach((u) => console.log("  " + u));
 }
-
-if (missingTokens.size) {
-  console.log(`\nMISSING FROM LEXICON (${missingTokens.size}):`);
-  [...missingTokens].sort().forEach((m) => console.log("  " + m));
-  process.exit(1);
+if (missing.size) {
+  console.log(`\nMISSING FROM BANK (${missing.size}):`);
+  [...missing].sort().forEach((m) => console.log("  " + m));
 }
 
-if (unresolved.size) process.exit(1);
+// The rendered bank on disk must match what the lexicon expects.
+try {
+  const index = JSON.parse(readFileSync("src/assets/phrase-bank.json", "utf8"));
+  const built = new Set(Object.keys(index.clips));
+  const notBuilt = [...defined].filter((c) => !built.has(c));
+  const stale = [...built].filter((c) => !defined.has(c));
+  if (notBuilt.length || stale.length) {
+    console.log(`\nBANK IS STALE — run npm run build:audio`);
+    if (notBuilt.length) console.log(`  not yet rendered (${notBuilt.length}): ${notBuilt.slice(0, 8).join(", ")}…`);
+    if (stale.length) console.log(`  left over (${stale.length}): ${stale.slice(0, 8).join(", ")}…`);
+    process.exit(1);
+  }
+} catch {
+  console.log("\n(no rendered bank on disk yet)");
+}
+
+if (missing.size || unresolved.size) process.exit(1);
 console.log("\nOK — every generated call is fully speakable.");
