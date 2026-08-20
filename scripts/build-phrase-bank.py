@@ -106,6 +106,83 @@ def synthesise(voice, text: str) -> np.ndarray:
     return np.frombuffer(raw, dtype="<i2").astype(np.float64) / 32768.0
 
 
+def speech_span(x: np.ndarray, floor=0.02) -> tuple[int, int] | None:
+    loud = np.where(np.abs(x) > floor)[0]
+    return (int(loud[0]), int(loud[-1])) if len(loud) else None
+
+
+def quiet_runs(x: np.ndarray, floor: float, smooth: float) -> list[tuple[int, int]]:
+    """Stretches quiet enough, for long enough, to be a pause."""
+    window = max(1, int(smooth * SOURCE_RATE))
+    quietness = np.convolve(
+        (np.abs(x) < floor).astype(float), np.ones(window) / window, mode="same"
+    ) > 0.85
+
+    runs, start = [], None
+    for i, is_quiet in enumerate(quietness):
+        if is_quiet and start is None:
+            start = i
+        elif not is_quiet and start is not None:
+            runs.append((start, i))
+            start = None
+    if start is not None:
+        runs.append((start, len(quietness)))
+    return runs
+
+
+def split_carrier(x: np.ndarray, solo_length: int) -> np.ndarray | None:
+    """
+    Cut "token, token." at the comma and return the first half.
+
+    The comma pause is short and varies with the token, so this tries
+    progressively higher silence floors. Two checks reject a bad cut: the
+    halves must be about equal, and each must be about as long as the token
+    rendered on its own — without the second check, a multi-word token can be
+    split inside itself, leaving one "half" holding a repetition and a bit.
+    """
+    span = speech_span(x)
+    if span is None:
+        return None
+    lo, hi = span
+    margin = int(0.06 * SOURCE_RATE)
+
+    for floor, smooth in ((0.02, 0.015), (0.035, 0.010), (0.05, 0.008)):
+        runs = [(a, b) for a, b in quiet_runs(x, floor, smooth) if a > lo + margin and b < hi - margin]
+        if not runs:
+            continue
+        a, b = max(runs, key=lambda r: r[1] - r[0])
+        middle = (a + b) // 2
+        first, second = x[lo:middle], x[middle:hi]
+        if min(len(first), len(second)) / max(len(first), len(second)) < 0.6:
+            continue
+        if not 0.65 <= len(first) / solo_length <= 1.55:
+            continue
+        return first
+    return None
+
+
+def synthesise_token(voice, text: str) -> tuple[np.ndarray, bool]:
+    """
+    Render a token with mid-sentence prosody where possible.
+
+    Spoken alone, every clip ends on a falling contour, and stringing those
+    together is what makes assembled speech sound like a list being read out
+    rather than a person talking. Saying the token twice and keeping the first
+    gives a version whose fall lands on the discarded copy instead.
+
+    Returns the clip and whether the carrier worked; when the repetitions
+    cannot be separated cleanly the token keeps its standalone rendering,
+    which is merely less natural, not wrong.
+    """
+    solo = synthesise(voice, text)
+    span = speech_span(solo)
+    if span is None:
+        return solo, False
+
+    carrier = split_carrier(synthesise(voice, f"{text}, {text}."), span[1] - span[0])
+    return (carrier, True) if carrier is not None else (solo, False)
+
+
 def fir_bandpass(num_taps: int, low_hz: float, high_hz: float, rate: float) -> np.ndarray:
     """Windowed-sinc bandpass, built as (lowpass at high) - (lowpass at low)."""
     if num_taps % 2 == 0:
@@ -130,7 +207,7 @@ def resample_linear(x: np.ndarray, src: int, dst: int) -> np.ndarray:
     return np.interp(src_idx, np.arange(len(x)), x)
 
 
-def compress(x: np.ndarray, rate: int, threshold=0.22, ratio=5.0) -> np.ndarray:
+def compress(x: np.ndarray, rate: int, threshold=0.30, ratio=3.0) -> np.ndarray:
     """Envelope-following compressor — radio audio is heavily levelled."""
     attack = np.exp(-1.0 / (0.003 * rate))
     release = np.exp(-1.0 / (0.09 * rate))
@@ -169,8 +246,10 @@ def process(x: np.ndarray) -> np.ndarray:
 
     x = compress(x, SOURCE_RATE)
 
-    # Soft saturation — the slight grit of an overdriven transmitter.
-    x = np.tanh(x * 2.1) / np.tanh(2.1)
+    # A touch of saturation for transmitter grit. Kept gentle: pushed harder it
+    # buys "radio" character at the cost of sounding synthetic, and the voice
+    # reading as human matters more than the grit does.
+    x = np.tanh(x * 1.35) / np.tanh(1.35)
 
     x = resample_linear(x, SOURCE_RATE, TARGET_RATE)
 
@@ -179,6 +258,15 @@ def process(x: np.ndarray) -> np.ndarray:
     x = np.convolve(x, taps2, mode="same")
 
     x = trim_silence(x)
+
+    # Short fades at the edges: clips are butted together at playback, and a
+    # waveform cut mid-cycle clicks audibly at the join.
+    fade = min(int(0.006 * TARGET_RATE), len(x) // 4)
+    if fade > 1:
+        ramp = np.linspace(0.0, 1.0, fade)
+        x[:fade] *= ramp
+        x[-fade:] *= ramp[::-1]
+
     peak = np.max(np.abs(x))
     if peak > 0:
         x = x / peak * 0.82
@@ -195,10 +283,15 @@ def main() -> int:
     voice = load_voice()
 
     clips: dict[str, np.ndarray] = {}
+    standalone: list[str] = []
     for i, (token, spoken_as) in enumerate(jobs, 1):
-        clips[token] = process(synthesise(voice, spoken_as))
+        raw, carried = synthesise_token(voice, spoken_as)
+        clips[token] = process(raw)
+        if not carried:
+            standalone.append(token)
         note = "" if token == spoken_as else f'  (as "{spoken_as}")'
-        print(f"  [{i:3}/{len(jobs)}] {token}{note}", flush=True)
+        flag = "" if carried else "   [rendered alone — has a terminal fall]"
+        print(f"  [{i:3}/{len(jobs)}] {token}{note}{flag}", flush=True)
 
     index: dict[str, list[int]] = {}
     pieces: list[np.ndarray] = []
@@ -233,6 +326,10 @@ def main() -> int:
         f"{wav_path.stat().st_size / 1024:.0f} KB wav, "
         f"{index_path.stat().st_size / 1024:.1f} KB index"
     )
+    carried = len(tokens) - len(standalone)
+    print(f"{carried}/{len(tokens)} clips took mid-sentence prosody from the carrier")
+    if standalone:
+        print(f"rendered alone: {', '.join(standalone)}")
     return 0
 
 

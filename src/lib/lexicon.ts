@@ -111,8 +111,12 @@ export interface SpokenToken {
   pauseAfter: number;
 }
 
-const WORD_GAP = 0.02;
-const COMMA_GAP = 0.16;
+// Clips are trimmed tight, so these are the whole gap between words. Kept
+// small: a uniform pause after every word is what makes assembled speech sound
+// like a list being read out. The longer one lands only at commas, where a
+// controller would actually draw breath.
+const WORD_GAP = 0.008;
+const COMMA_GAP = 0.13;
 
 /** "2500" -> ["two","thousand","five","hundred"]; "18" -> ["one","eight"]. */
 function speakNumber(raw: string): string[] {
