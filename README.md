@@ -47,8 +47,8 @@ assembled at playback, the way automated aeronautical audio (ATIS and the like) 
   turns a call into clips. Registrations become phonetics (`VH-ABC` → victor hotel alpha bravo
   charlie) and numbers take aviation forms — `13` reads digit-by-digit ("one three") while `2500`
   groups ("two thousand five hundred").
-- `npm run build:audio` renders every token with espeak-ng and packs them into one WAV sprite
-  (`src/assets/phrase-bank.wav`, 116 clips, 74 s, 1.2 MB) plus a JSON index of offsets. The app
+- `npm run build:audio` renders every token with Piper and packs them into one WAV sprite
+  (`src/assets/phrase-bank.wav`, 116 clips, 86 s, 1.3 MB) plus a JSON index of offsets. The app
   fetches it once, decodes it once, and slices clips out at playback.
 - `npm run check:audio` proves every call the app can generate is fully speakable — it sweeps all
   9,300 combinations of scenario and vocabulary and fails on any token the bank lacks. **Run it
@@ -56,26 +56,29 @@ assembled at playback, the way automated aeronautical audio (ATIS and the like) 
 
 ### The voice
 
-The bank is rendered in a gender-neutral voice, defined in `scripts/espeak/rt-neutral` and
-installed into espeak-ng by the build. None of espeak's shipped variants are neutral — the male
-ones measure 90–110 Hz and the female ones about 195 Hz, with nothing in between — so the variant
-sets its own pitch and, just as importantly, leaves the formants unscaled at 100%: perceived
-gender follows formant positions as much as pitch, and the shipped variants shift them either way.
+The bank is spoken by [Piper](https://github.com/rhasspy/piper), a neural TTS, using the
+multi-speaker LibriTTS model. A formant synthesiser (espeak and friends) sounds unmistakably
+robotic no matter how it is filtered afterwards, and radio processing does not hide it; a neural
+model trained on real speech does not have that problem.
 
-`npm run check:voice` measures it rather than trusting it, tracking fundamental frequency across a
-sample of real bank tokens and failing if the median leaves the 155–190 Hz androgynous band.
-Current median is **171 Hz**. Tune the `pitch` line in the variant if you want to move it.
+Being multi-speaker also makes the voice choosable, so it is picked by measurement rather than by
+ear. `npm run check:voice --sweep` walks the model's 904 speakers, keeps those whose median
+fundamental falls in the **155–190 Hz** androgynous band — between typical male (~110 Hz) and
+typical female (~210 Hz) — and prefers the one holding the tightest spread across tokens, so the
+assembled call sounds like one person rather than a chorus. That selected **speaker 224**, median
+**174 Hz**. Plain `npm run check:voice` re-checks the current pick and fails if it drifts out of
+band.
 
-Two things to know if you re-tune: measure against **single tokens, not sentences**, because each
-clip is rendered alone and picks up espeak's utterance-final falling intonation — the same setting
-reads roughly 20 Hz higher on running prose. And measure **before** processing: the bank is
-highpassed at 300 Hz, which removes the fundamental outright. The pitch still reads correctly
-through the harmonics — the missing-fundamental effect, exactly as real radio and telephone audio
-behave — but it cannot be recovered from the processed file.
+Two things to know if you re-pick: measure against **single tokens, not sentences**, because each
+clip is rendered alone and picks up utterance-final falling intonation, which reads lower than
+running prose does. And measure **before** processing: the bank is highpassed at 300 Hz, which
+removes the fundamental outright. The pitch still reads correctly through the harmonics — the
+missing-fundamental effect, exactly as real radio and telephone audio behave — but it cannot be
+recovered from the processed file.
 
-Regenerating the bank needs `espeak-ng` and `python3` with `numpy`, and write access to espeak's
-data directory to install the voice variant; building or running the app needs none of that — the
-generated sprite is committed.
+Regenerating the bank needs `pip install piper-tts` and `python3` with `numpy`. The voice model is
+about 120 MB, so it is not committed — the build downloads it once into `.cache/piper/`. Building
+or running the app needs none of that: the generated sprite is committed.
 
 If the bank cannot be loaded, or a call somehow needs a token it lacks, playback falls back to the
 speech synthesiser so a call is never silently dropped. The **Radio FX** toggle in the header

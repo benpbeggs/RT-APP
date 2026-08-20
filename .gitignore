@@ -25,3 +25,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Cached Piper voice model (large; the generated bank is committed instead).
+.cache/
+__pycache__/
+*.pyc

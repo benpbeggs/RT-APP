@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the phrase bank: one recorded clip per token, packed into a sprite.
 
-Each token in src/lib/lexicon.ts is synthesised with espeak-ng, put through a
+Each token in src/lib/lexicon.ts is spoken by a neural TTS voice, put through a
 VHF-comms processing chain, resampled to 8 kHz and packed into a single WAV
 with a JSON index of sample offsets. The app fetches one file, decodes it once
 and slices clips out of it at playback.
@@ -10,73 +10,98 @@ Processing the voice offline is the whole point of the exercise: the Web Speech
 API gives no audio node for synthesised speech, so a live TTS voice cannot be
 filtered in the browser. A recorded clip can be.
 
+The voice is Piper (a neural TTS) rather than a formant synthesiser, which is
+what stops it sounding robotic. The model is LibriTTS, trained on 904 real
+speakers; the speaker below was chosen by measurement — see check-voice.py.
+
 Usage: python3 scripts/build-phrase-bank.py tokens.json out.wav out.json
 """
 
 import json
-import struct
-import subprocess
 import sys
+import tarfile
 import tempfile
+import urllib.request
 import wave
 from pathlib import Path
 
 import numpy as np
 
-SOURCE_RATE = 22050  # what espeak-ng emits
+SOURCE_RATE = 22050  # what the Piper model emits
 TARGET_RATE = 8000  # plenty for a 2.9 kHz-limited signal, and halves the size
 
-# A gender-neutral voice — see scripts/espeak/rt-neutral for how it was chosen.
-VARIANT_NAME = "rt-neutral"
-VOICE = f"en+{VARIANT_NAME}"
+# Multi-speaker LibriTTS. Voice models are large and are not committed; the
+# generated bank is, so building or running the app never needs this download.
+VOICE_URL = (
+    "https://github.com/rhasspy/piper/releases/download/v0.0.2/"
+    "voice-en-us-libritts-high.tar.gz"
+)
+VOICE_FILE = "en-us-libritts-high.onnx"
+CACHE_DIR = Path(__file__).parent.parent / ".cache" / "piper"
+
+# Speaker 224 of 904, picked by measuring every 14th speaker: its pitch sits at
+# the centre of the gender-neutral band on real bank tokens (median 171 Hz) and
+# holds the tightest spread across them, so clips sound like one person.
+SPEAKER_ID = 224
+
+# Slightly quicker than conversational, the way controllers actually speak.
+LENGTH_SCALE = 0.95
 
 # The comms passband. Real VHF aeronautical audio is roughly 300-3000 Hz.
 HIGHPASS_HZ = 300.0
 LOWPASS_HZ = 2900.0
 
 
-def install_variant() -> None:
-    """Put the neutral voice variant where espeak-ng will find it."""
-    banner = subprocess.run(
-        ["espeak-ng", "--version"], check=True, capture_output=True, text=True
-    ).stdout
-    if "Data at: " not in banner:
-        raise SystemExit("could not locate espeak-ng data directory")
-    data_dir = Path(banner.split("Data at: ")[1].strip())
+def ensure_voice() -> Path:
+    """Fetch and unpack the Piper voice model, cached between builds."""
+    model = CACHE_DIR / VOICE_FILE
+    if model.exists():
+        return model
 
-    source = Path(__file__).parent / "espeak" / VARIANT_NAME
-    target = data_dir / "voices" / "!v" / VARIANT_NAME
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Downloading voice model to {CACHE_DIR} (about 120 MB, once)…", flush=True)
+    with tempfile.NamedTemporaryFile(suffix=".tar.gz") as tmp:
+        try:
+            with urllib.request.urlopen(VOICE_URL, timeout=300) as response:
+                tmp.write(response.read())
+        except Exception as exc:
+            raise SystemExit(
+                f"could not download the voice model: {exc}\n"
+                f"Fetch {VOICE_URL} manually and unpack it into {CACHE_DIR}"
+            ) from None
+        tmp.flush()
+        with tarfile.open(tmp.name) as archive:
+            archive.extractall(CACHE_DIR)
+
+    if not model.exists():
+        raise SystemExit(f"{VOICE_FILE} missing after unpacking into {CACHE_DIR}")
+    return model
+
+
+def load_voice():
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(source.read_text())
-    except PermissionError:
-        raise SystemExit(
-            f"cannot write {target}\n"
-            f"Install the voice variant manually, then re-run:\n"
-            f"  sudo cp {source} {target}"
-        ) from None
+        from piper import PiperVoice
+    except ImportError:
+        raise SystemExit("piper-tts is not installed — run: pip install piper-tts") from None
+    return PiperVoice.load(str(ensure_voice()))
 
 
-def synthesise(text: str, path: Path) -> None:
-    """espeak-ng at a controller's cadence: brisk and level."""
-    subprocess.run(
-        [
-            "espeak-ng",
-            "-v", VOICE,
-            "-s", "158",   # words per minute
-            "-a", "170",   # amplitude
-            "-g", "1",     # minimal word gap; spacing is handled at playback
-            "-w", str(path),
+def synthesise(voice, text: str) -> np.ndarray:
+    """One clip of speech, as floats in [-1, 1]."""
+    from piper import SynthesisConfig
+    import io
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as w:
+        voice.synthesize_wav(
             text,
-        ],
-        check=True,
-        capture_output=True,
-    )
-
-
-def read_wav(path: Path) -> np.ndarray:
-    with wave.open(str(path)) as w:
+            w,
+            syn_config=SynthesisConfig(speaker_id=SPEAKER_ID, length_scale=LENGTH_SCALE),
+        )
+    buffer.seek(0)
+    with wave.open(buffer) as w:
         assert w.getnchannels() == 1 and w.getsampwidth() == 2
+        assert w.getframerate() == SOURCE_RATE, f"expected {SOURCE_RATE} Hz"
         raw = w.readframes(w.getnframes())
     return np.frombuffer(raw, dtype="<i2").astype(np.float64) / 32768.0
 
@@ -167,16 +192,13 @@ def main() -> int:
     jobs = json.loads(tokens_path.read_text())
     tokens = [job[0] for job in jobs]
 
-    install_variant()
+    voice = load_voice()
 
     clips: dict[str, np.ndarray] = {}
-    with tempfile.TemporaryDirectory() as tmp:
-        scratch = Path(tmp) / "clip.wav"
-        for i, (token, spoken_as) in enumerate(jobs, 1):
-            synthesise(spoken_as, scratch)
-            clips[token] = process(read_wav(scratch))
-            note = "" if token == spoken_as else f'  (as "{spoken_as}")'
-            print(f"  [{i:3}/{len(jobs)}] {token}{note}", flush=True)
+    for i, (token, spoken_as) in enumerate(jobs, 1):
+        clips[token] = process(synthesise(voice, spoken_as))
+        note = "" if token == spoken_as else f'  (as "{spoken_as}")'
+        print(f"  [{i:3}/{len(jobs)}] {token}{note}", flush=True)
 
     index: dict[str, list[int]] = {}
     pieces: list[np.ndarray] = []
