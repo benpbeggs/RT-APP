@@ -1,7 +1,7 @@
 // Fold the built app into one self-contained HTML file.
 //
 // Published Artifacts run under a CSP that blocks requests to other hosts and
-// are served as a single page, so the CSS, JS and the phrase-bank audio all
+// are served as a single page, so the CSS, JS and the call-bank audio all
 // have to be embedded rather than fetched as sibling files.
 //
 // Usage: node scripts/inline-artifact.mjs [outfile]
@@ -25,7 +25,7 @@ const css = readFileSync(resolve(assets, pick(".css")), "utf8");
 let js = readFileSync(resolve(assets, pick(".js")), "utf8");
 
 // Swap every emitted asset URL for an inline data URI.
-const MIME = { ".wav": "audio/wav", ".json": "application/json" };
+const MIME = { ".bin": "application/octet-stream", ".json": "application/json" };
 let embedded = 0;
 for (const file of files) {
   const ext = file.slice(file.lastIndexOf("."));

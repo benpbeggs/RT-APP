@@ -11,8 +11,8 @@ intentions to other traffic ("Traffic, …, taxiing runway 18"), while in contro
 *request* and *read back* clearances. Each call in `src/data/phraseology.ts` is tagged with the
 aerodrome types it belongs at, and calls that read the same at both (position reports, PAN
 PAN/MAYDAY, general phrases) use a `{station}` placeholder that resolves to "Traffic" or "Tower".
-Switching type also re-rolls the aerodrome, so a CTAF flight uses a non-towered field and a
-controlled flight a towered one. Both give a complete sequence — 18 calls on a CTAF, 19 controlled.
+Switching type also switches flight, so a CTAF flight uses a non-towered field and a controlled
+flight a towered one. Both give a complete sequence — 18 calls on a CTAF, 19 controlled.
 
 ## Modes
 
@@ -21,8 +21,8 @@ controlled flight a towered one. Both give a complete sequence — 18 calls on a
   as separate non-sequential groups. Each scenario shows a plan-view diagram of where the aircraft
   is when the call is made, and you answer either by typing or by pressing **Transmit** and
   speaking. The answer is checked element by element and the model call revealed with
-  text-to-speech playback. One aircraft and aerodrome is used for the whole flight, so the
-  sequence hangs together; **New flight** rolls a fresh one.
+  a recording of the model call. One flight is used throughout, so the sequence hangs together;
+  **New flight** moves to another.
 - **Reference** — every call grouped by phase of flight, in the same order, each with its diagram.
 - **Sources & Accuracy** — what the phrase library is based on and its limitations.
 
@@ -31,77 +31,58 @@ controlled flight a towered one. Both give a complete sequence — 18 calls on a
 Playback sounds like a VHF transmission rather than a phone assistant: the PTT click, a burst of
 squelch as the carrier opens, a faint hiss under the voice, a squelch tail and a release click.
 
-The voice is **recorded, not synthesised at playback**. The Web Speech API exposes no audio node
-for synthesised speech, so a live TTS voice cannot be filtered in the browser — which is why the
-voice is rendered ahead of time instead, put through the comms chain offline, and played back as
-audio. Processing (`scripts/build-phrase-bank.py`) is a 300–2900 Hz windowed-sinc bandpass, an
-envelope-following compressor, `tanh` saturation for transmitter grit, and a resample to 8 kHz —
-authentic for a signal band-limited to 2.9 kHz, and it halves the file. Measured result: 99.8% of
-the bank's energy sits inside the passband.
+**Every call is recorded whole** — one continuous utterance, rendered ahead of time by a neural TTS
+and put through the comms chain offline. That is the single decision that makes it sound spoken.
+Earlier versions assembled calls from recorded pieces, first one per word and then one per phrase,
+and both sounded like a machine reading a list: every join is a seam, and intonation that should
+run across a whole sentence gets chopped into fragments that each rise and fall on their own.
 
-Because calls are generated — the callsign, aerodrome, runway, altitude and distance all vary —
-whole sentences cannot be pre-recorded. But calls are not free-form either: each is a template
-with a few slots, and everything between the slots is fixed wording. So the bank records **whole
-phrases**, and playback stitches those larger pieces together:
+A real flight simulator ([MSFS synthesises ATC at runtime with a neural TTS
+engine](https://www.flightsimulator.com/)) sidesteps this by generating each transmission in full
+as it is needed. A browser cannot do that: the Web Speech API exposes no audio node for
+synthesised speech, so a live TTS voice cannot be filtered, and a neural voice model small enough
+to ship to the browser does not exist (Piper's smallest is 60 MB before the ONNX runtime).
+Rendering the same complete utterances ahead of time gets the same result within those limits.
 
-- Each run of fixed wording between two slots is one clip — "taxiing runway", "cleared for
-  takeoff", "engine failure forced landing".
-- Each possible slot value is one clip, spoken right through — a callsign is a single recording of
-  "Cessna victor hotel alpha bravo charlie", not six letters glued together.
+The cost is that the calls have to be a finite set. `src/data/flights.ts` holds **twelve fixed
+flights**, one per aerodrome — each with its own callsign, runway, QNH and the rest — and every
+scenario is recorded for each flight it suits. That is 222 recordings. Randomised values would
+mean recording combinations without end; twelve distinct flights is ample for drilling call
+structure, and "New flight" moves between them.
 
-That granularity is the point. An earlier version recorded one clip per word and spelled callsigns
-letter by letter, and it sounded like a list being read out however good the voice was. Phrases
-carry their own rhythm; single words have none to carry. It is also why the value pools in
-`src/lib/scenario.ts` are fixed and modest rather than open ranges — every value needs a recording,
-and random three-letter registrations would mean 17,576 of them per aircraft type.
+Processing (`scripts/build-call-bank.py`) is a 300–2900 Hz windowed-sinc bandpass, an
+envelope-following compressor, gentle `tanh` saturation for transmitter grit, and a resample to
+8 kHz — authentic for a signal band-limited to 2.9 kHz. Recordings are encoded as 24 kbps mono MP3
+and written end to end into `src/assets/call-bank.bin` with a JSON index of byte offsets, so the
+app makes one fetch and decodes a call the first time it is played.
 
-- `src/lib/lexicon.ts` is the single source of truth: `segmentTemplate()` splits a call into
-  literals and slots (on commas first, so each comma becomes a real pause), `spokenValue()` gives
-  the spoken form of a slot value — registrations become phonetics, `2500` groups as "two thousand
-  five hundred", runways and QNH go digit by digit — and `ALL_CLIPS` is what the bank must hold.
-- `npm run build:audio` renders every clip with Piper and packs them into one WAV sprite
-  (`src/assets/phrase-bank.wav`) plus a JSON index of offsets. The app fetches it once, decodes it
-  once, and slices clips out at playback.
-- `npm run check:audio` proves every call the app can generate is fully speakable — it sweeps every
-  scenario against every slot value, fails on any clip the bank lacks, and also fails if the
-  rendered bank on disk has drifted from what the lexicon expects. **Run it after touching any
-  model call or value pool**, then rebuild the bank if it reports staleness.
-
-Each clip is also rendered with mid-sentence prosody where possible: spoken alone, a phrase ends on
-a falling contour, so the build says it twice ("phrase, phrase.") and keeps the first half, leaving
-the fall on the discarded copy. The build reports which clips could not be split cleanly and so
-kept their standalone rendering.
+- `npm run build:audio` renders the bank. Needs `pip install piper-tts lameenc` and `numpy`; the
+  voice model downloads once into `.cache/piper`. Building or running the app needs none of it —
+  the bank is committed.
+- `npm run check:audio` fails if any call lacks a recording, if a template references something a
+  flight has no value for, or if the bank on disk has drifted from the code. **Run it after
+  touching any model call or flight**, or the app will quietly fall back to the browser's
+  synthesiser.
 
 ### The voice
 
 The bank is spoken by [Piper](https://github.com/rhasspy/piper), a neural TTS, using the
 multi-speaker LibriTTS model. A formant synthesiser (espeak and friends) sounds unmistakably
-robotic no matter how it is filtered afterwards, and radio processing does not hide it; a neural
-model trained on real speech does not have that problem.
+robotic no matter how it is filtered afterwards; a model trained on real speech does not.
 
 Being multi-speaker also makes the voice choosable, so it is picked by measurement rather than by
 ear. `npm run check:voice --sweep` walks the model's 904 speakers, keeps those whose median
 fundamental falls in the **155–190 Hz** androgynous band — between typical male (~110 Hz) and
-typical female (~210 Hz) — and prefers the one holding the tightest spread across tokens, so the
-assembled call sounds like one person rather than a chorus. That selected **speaker 224**, median
-**174 Hz**. Plain `npm run check:voice` re-checks the current pick and fails if it drifts out of
-band.
+typical female (~210 Hz) — and prefers the one holding the tightest spread. That selected
+**speaker 224**, median **174 Hz**. Plain `npm run check:voice` re-checks the current pick.
 
-Two things to know if you re-pick: measure against **single tokens, not sentences**, because each
-clip is rendered alone and picks up utterance-final falling intonation, which reads lower than
-running prose does. And measure **before** processing: the bank is highpassed at 300 Hz, which
-removes the fundamental outright. The pitch still reads correctly through the harmonics — the
-missing-fundamental effect, exactly as real radio and telephone audio behave — but it cannot be
-recovered from the processed file.
+Measure **before** processing if you re-pick: the bank is highpassed at 300 Hz, which removes the
+fundamental outright. The pitch still reads through the harmonics — the missing-fundamental
+effect, exactly as real radio and telephone audio behave — but it cannot be recovered from the
+processed file.
 
-Regenerating the bank needs `pip install piper-tts` and `python3` with `numpy`. The voice model is
-about 120 MB, so it is not committed — the build downloads it once into `.cache/piper/`. Building
-or running the app needs none of that: the generated sprite is committed.
-
-If the bank cannot be loaded, or a call somehow needs a token it lacks, playback falls back to the
-speech synthesiser so a call is never silently dropped. The **Radio FX** toggle in the header
-switches to plain unprocessed speech, which is easier to learn the wording from; the choice
-persists in `localStorage`.
+The **Radio FX** toggle in the header drops the click, squelch and hiss. It plays the same
+recording either way — it does not fall back to a different voice.
 
 ## Voice answers
 

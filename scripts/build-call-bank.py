@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""Render the phrase bank: one recorded clip per phrase, packed into a sprite.
+"""Render the call bank: every call, recorded whole.
 
-Each clip in src/lib/lexicon.ts is spoken by a neural TTS voice, put through a
-VHF-comms processing chain, resampled to 8 kHz and packed into a single WAV
-with a JSON index of sample offsets. The app fetches one file, decodes it once
-and slices clips out of it at playback.
+Each call in src/lib/lexicon.ts is spoken by a neural TTS voice as one
+continuous utterance, put through a VHF-comms processing chain, resampled to
+8 kHz and encoded as MP3. The recordings are written end to end into one binary
+with a JSON index of byte offsets; the app fetches it once and decodes a call
+the first time it is played.
+
+Recording whole calls is the point. Assembling them from smaller pieces — words,
+or even whole phrases — leaves seams at every join and flattens the intonation
+that runs across a sentence, which is what makes assembled speech sound like a
+machine reading a list. A real flight simulator synthesises each transmission in
+full at runtime; a browser cannot host a neural voice that large, but rendering
+the same complete utterances ahead of time gets the same result.
 
 Processing the voice offline is the whole point of the exercise: the Web Speech
 API gives no audio node for synthesised speech, so a live TTS voice cannot be
@@ -14,11 +22,7 @@ The voice is Piper (a neural TTS) rather than a formant synthesiser, which is
 what stops it sounding robotic. The model is LibriTTS, trained on 904 real
 speakers; the speaker below was chosen by measurement — see check-voice.py.
 
-Clips are whole phrases — a run of fixed wording, or one slot value spoken
-right through — not single words, which is what lets assembled calls carry a
-natural rhythm.
-
-Usage: python3 scripts/build-phrase-bank.py clips.json out.wav out.json
+Usage: python3 scripts/build-call-bank.py calls.json out.bin out.json
 """
 
 import json
@@ -29,10 +33,13 @@ import urllib.request
 import wave
 from pathlib import Path
 
+import lameenc
 import numpy as np
 
 SOURCE_RATE = 22050  # what the Piper model emits
 TARGET_RATE = 8000  # plenty for a 2.9 kHz-limited signal, and halves the size
+
+MP3_BITRATE = 24  # kbps mono; the signal is band-limited to 2.9 kHz
 
 # Multi-speaker LibriTTS. Voice models are large and are not committed; the
 # generated bank is, so building or running the app never needs this download.
@@ -44,8 +51,8 @@ VOICE_FILE = "en-us-libritts-high.onnx"
 CACHE_DIR = Path(__file__).parent.parent / ".cache" / "piper"
 
 # Speaker 224 of 904, picked by measuring every 14th speaker: its pitch sits at
-# the centre of the gender-neutral band on real bank tokens (median 171 Hz) and
-# holds the tightest spread across them, so clips sound like one person.
+# the centre of the gender-neutral band (median 174 Hz) and holds the tightest
+# spread across utterances. See check-voice.py.
 SPEAKER_ID = 224
 
 # Slightly quicker than conversational, the way controllers actually speak.
@@ -108,83 +115,6 @@ def synthesise(voice, text: str) -> np.ndarray:
         assert w.getframerate() == SOURCE_RATE, f"expected {SOURCE_RATE} Hz"
         raw = w.readframes(w.getnframes())
     return np.frombuffer(raw, dtype="<i2").astype(np.float64) / 32768.0
-
-
-def speech_span(x: np.ndarray, floor=0.02) -> tuple[int, int] | None:
-    loud = np.where(np.abs(x) > floor)[0]
-    return (int(loud[0]), int(loud[-1])) if len(loud) else None
-
-
-def quiet_runs(x: np.ndarray, floor: float, smooth: float) -> list[tuple[int, int]]:
-    """Stretches quiet enough, for long enough, to be a pause."""
-    window = max(1, int(smooth * SOURCE_RATE))
-    quietness = np.convolve(
-        (np.abs(x) < floor).astype(float), np.ones(window) / window, mode="same"
-    ) > 0.85
-
-    runs, start = [], None
-    for i, is_quiet in enumerate(quietness):
-        if is_quiet and start is None:
-            start = i
-        elif not is_quiet and start is not None:
-            runs.append((start, i))
-            start = None
-    if start is not None:
-        runs.append((start, len(quietness)))
-    return runs
-
-
-def split_carrier(x: np.ndarray, solo_length: int) -> np.ndarray | None:
-    """
-    Cut "phrase, phrase." at the comma and return the first half.
-
-    The comma pause is short and varies with the phrase, so this tries
-    progressively higher silence floors. Two checks reject a bad cut: the
-    halves must be about equal, and each must be about as long as the phrase
-    rendered on its own — without the second check, a multi-word phrase can be
-    split inside itself, leaving one "half" holding a repetition and a bit.
-    """
-    span = speech_span(x)
-    if span is None:
-        return None
-    lo, hi = span
-    margin = int(0.06 * SOURCE_RATE)
-
-    for floor, smooth in ((0.02, 0.015), (0.035, 0.010), (0.05, 0.008)):
-        runs = [(a, b) for a, b in quiet_runs(x, floor, smooth) if a > lo + margin and b < hi - margin]
-        if not runs:
-            continue
-        a, b = max(runs, key=lambda r: r[1] - r[0])
-        middle = (a + b) // 2
-        first, second = x[lo:middle], x[middle:hi]
-        if min(len(first), len(second)) / max(len(first), len(second)) < 0.6:
-            continue
-        if not 0.65 <= len(first) / solo_length <= 1.55:
-            continue
-        return first
-    return None
-
-
-def synthesise_clip(voice, text: str) -> tuple[np.ndarray, bool]:
-    """
-    Render a clip with mid-sentence prosody where possible.
-
-    Spoken alone, every clip ends on a falling contour, and stringing those
-    together is what makes assembled speech sound like a list being read out
-    rather than a person talking. Saying the phrase twice and keeping the first
-    gives a version whose fall lands on the discarded copy instead.
-
-    Returns the clip and whether the carrier worked; when the repetitions
-    cannot be separated cleanly the clip keeps its standalone rendering,
-    which is merely less natural, not wrong.
-    """
-    solo = synthesise(voice, text)
-    span = speech_span(solo)
-    if span is None:
-        return solo, False
-
-    carrier = split_carrier(synthesise(voice, f"{text}, {text}."), span[1] - span[0])
-    return (carrier, True) if carrier is not None else (solo, False)
 
 
 def fir_bandpass(num_taps: int, low_hz: float, high_hz: float, rate: float) -> np.ndarray:
@@ -277,63 +207,44 @@ def process(x: np.ndarray) -> np.ndarray:
     return x
 
 
+def encode_mp3(x: np.ndarray) -> bytes:
+    pcm = (np.clip(x, -1.0, 1.0) * 32767).astype("<i2")
+    encoder = lameenc.Encoder()
+    encoder.set_bit_rate(MP3_BITRATE)
+    encoder.set_in_sample_rate(TARGET_RATE)
+    encoder.set_channels(1)
+    encoder.set_quality(2)
+    return encoder.encode(pcm.tobytes()) + encoder.flush()
+
+
 def main() -> int:
-    tokens_path, wav_path, index_path = (Path(p) for p in sys.argv[1:4])
-    # [[clip id, text to synthesise], ...] — they differ for slot clips, whose id
-    # encodes the slot and value while the text is how it is actually said.
-    jobs = json.loads(tokens_path.read_text())
-    tokens = [job[0] for job in jobs]
+    calls_path, bin_path, index_path = (Path(p) for p in sys.argv[1:4])
+    calls = json.loads(calls_path.read_text())
 
     voice = load_voice()
 
-    clips: dict[str, np.ndarray] = {}
-    standalone: list[str] = []
-    for i, (token, spoken_as) in enumerate(jobs, 1):
-        raw, carried = synthesise_clip(voice, spoken_as)
-        clips[token] = process(raw)
-        if not carried:
-            standalone.append(token)
-        note = "" if token == spoken_as else f'  (as "{spoken_as}")'
-        flag = "" if carried else "   [rendered alone — has a terminal fall]"
-        print(f"  [{i:3}/{len(jobs)}] {token}{note}{flag}", flush=True)
-
     index: dict[str, list[int]] = {}
-    pieces: list[np.ndarray] = []
+    blobs: list[bytes] = []
     cursor = 0
-    # A few silent samples between clips stop one bleeding into the next.
-    spacer = np.zeros(int(TARGET_RATE * 0.01))
+    seconds = 0.0
 
-    for token in tokens:
-        clip = clips[token]
-        index[token] = [cursor, len(clip)]
-        pieces.append(clip)
-        pieces.append(spacer)
-        cursor += len(clip) + len(spacer)
+    for i, (call_id, text) in enumerate(calls, 1):
+        audio = process(synthesise(voice, text))
+        mp3 = encode_mp3(audio)
+        index[call_id] = [cursor, len(mp3)]
+        blobs.append(mp3)
+        cursor += len(mp3)
+        seconds += len(audio) / TARGET_RATE
+        print(f"  [{i:3}/{len(calls)}] {call_id}  {len(audio) / TARGET_RATE:.1f}s", flush=True)
 
-    sprite = np.concatenate(pieces)
-    pcm = np.clip(sprite, -1.0, 1.0)
-    pcm = (pcm * 32767).astype("<i2")
+    bin_path.write_bytes(b"".join(blobs))
+    index_path.write_text(json.dumps({"calls": index}, separators=(",", ":")))
 
-    with wave.open(str(wav_path), "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(TARGET_RATE)
-        w.writeframes(pcm.tobytes())
-
-    index_path.write_text(
-        json.dumps({"sampleRate": TARGET_RATE, "clips": index}, separators=(",", ":"))
-    )
-
-    seconds = len(sprite) / TARGET_RATE
     print(
-        f"\n{len(tokens)} clips, {seconds:.1f}s total, "
-        f"{wav_path.stat().st_size / 1024:.0f} KB wav, "
+        f"\n{len(calls)} calls, {seconds / 60:.1f} min of speech, "
+        f"{bin_path.stat().st_size / 1048576:.2f} MB audio, "
         f"{index_path.stat().st_size / 1024:.1f} KB index"
     )
-    carried = len(tokens) - len(standalone)
-    print(f"{carried}/{len(tokens)} clips took mid-sentence prosody from the carrier")
-    if standalone:
-        print(f"rendered alone: {', '.join(standalone)}")
     return 0
 
 

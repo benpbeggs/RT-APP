@@ -13,9 +13,8 @@
 // little fast and low), and the filtered radio artefacts are layered around
 // it. That carries most of the effect.
 
-import bankAudioUrl from "../assets/phrase-bank.wav?url";
-import bankIndexUrl from "../assets/phrase-bank.json?url";
-import { clipsForCall } from "./lexicon";
+import bankAudioUrl from "../assets/call-bank.bin?url";
+import bankIndexUrl from "../assets/call-bank.json?url";
 
 const STORAGE_KEY = "rt-app.radio-effects";
 
@@ -220,35 +219,35 @@ export function stopTransmission(): void {
   closeCarrier = null;
 }
 
-// ----------------------------------------------------------------- phrase bank
+// ------------------------------------------------------------------ call bank
+//
+// Every call is recorded as one continuous utterance, already put through the
+// comms chain offline. Recordings live end to end in a single binary; the index
+// says where each one starts. They are decoded lazily and cached, so opening
+// the app costs one fetch and nothing is decoded until something is played.
 
-interface PhraseBank {
-  buffer: AudioBuffer;
-  clips: Record<string, [offset: number, length: number]>;
-  sampleRate: number;
+interface CallBank {
+  data: ArrayBuffer;
+  calls: Record<string, [byteOffset: number, byteLength: number]>;
 }
 
-let bankPromise: Promise<PhraseBank | null> | null = null;
+let bankPromise: Promise<CallBank | null> | null = null;
+const decoded = new Map<string, AudioBuffer>();
 
-/**
- * Load the recorded phrase bank: one sprite of every token, already put
- * through the comms processing chain offline. Loaded once, on first use.
- */
-function loadBank(ctx: AudioContext): Promise<PhraseBank | null> {
+function loadBank(): Promise<CallBank | null> {
   bankPromise ??= (async () => {
     try {
-      const [wav, index] = await Promise.all([
+      const [data, index] = await Promise.all([
         fetch(bankAudioUrl).then((r) => {
-          if (!r.ok) throw new Error(`phrase bank audio: ${r.status}`);
+          if (!r.ok) throw new Error(`call bank audio: ${r.status}`);
           return r.arrayBuffer();
         }),
         fetch(bankIndexUrl).then((r) => {
-          if (!r.ok) throw new Error(`phrase bank index: ${r.status}`);
-          return r.json() as Promise<{ sampleRate: number; clips: PhraseBank["clips"] }>;
+          if (!r.ok) throw new Error(`call bank index: ${r.status}`);
+          return r.json() as Promise<{ calls: CallBank["calls"] }>;
         }),
       ]);
-      const buffer = await ctx.decodeAudioData(wav);
-      return { buffer, clips: index.clips, sampleRate: index.sampleRate };
+      return { data, calls: index.calls };
     } catch {
       // Any failure here just means we speak the call with the synthesiser.
       return null;
@@ -257,117 +256,119 @@ function loadBank(ctx: AudioContext): Promise<PhraseBank | null> {
   return bankPromise;
 }
 
-interface ResolvedClip {
-  offset: number;
-  duration: number;
-  pauseAfter: number;
+/**
+ * Drop the silence an MP3 decode leaves at each end — the encoder's own delay
+ * and padding, around 150ms in total. Left in, it delays the voice behind the
+ * squelch and holds the carrier open after the call has finished.
+ */
+function trimSilence(ctx: AudioContext, buffer: AudioBuffer): AudioBuffer {
+  const samples = buffer.getChannelData(0);
+  const floor = 0.004;
+
+  let start = 0;
+  while (start < samples.length && Math.abs(samples[start]) < floor) start += 1;
+  let end = samples.length - 1;
+  while (end > start && Math.abs(samples[end]) < floor) end -= 1;
+
+  if (start === 0 && end === samples.length - 1) return buffer;
+  if (end <= start) return buffer;
+
+  const trimmed = ctx.createBuffer(1, end - start + 1, buffer.sampleRate);
+  trimmed.getChannelData(0).set(samples.subarray(start, end + 1));
+  return trimmed;
+}
+
+/** Decode one call's recording, keeping it for next time. */
+async function recordingFor(
+  ctx: AudioContext,
+  bank: CallBank,
+  id: string,
+): Promise<AudioBuffer | null> {
+  const cached = decoded.get(id);
+  if (cached) return cached;
+
+  const entry = bank.calls[id];
+  if (!entry) return null;
+
+  const [offset, length] = entry;
+  try {
+    // decodeAudioData detaches the buffer it is given, so hand it a copy.
+    const raw = await ctx.decodeAudioData(bank.data.slice(offset, offset + length));
+    const buffer = trimSilence(ctx, raw);
+    decoded.set(id, buffer);
+    return buffer;
+  } catch {
+    return null;
+  }
 }
 
 /**
- * A call to speak. The template and values are what the recorded bank plays
- * from — it stitches whole phrases, so it needs to know where the slots are,
- * not just the finished sentence. `text` is only for the fallback synthesiser.
+ * A call to speak. `id` names the recording of it; `text` is only used if that
+ * recording cannot be played and the synthesiser has to stand in.
  */
 export interface SpokenCall {
   text: string;
-  template: string;
-  values: Record<string, string>;
-}
-
-/**
- * Resolve every segment of the call to a clip up front. Returning null before
- * anything is scheduled is what lets the caller fall back cleanly — a
- * half-scheduled call would otherwise play over the synthesised one.
- */
-function resolveClips(bank: PhraseBank, call: SpokenCall): ResolvedClip[] | null {
-  const { segments, missing } = clipsForCall(call.template, call.values);
-  if (missing.length > 0 || segments.length === 0) return null;
-
-  const resolved: ResolvedClip[] = [];
-  for (const { clip, pauseAfter } of segments) {
-    const entry = bank.clips[clip];
-    if (!entry) return null;
-    resolved.push({
-      offset: entry[0] / bank.sampleRate,
-      duration: entry[1] / bank.sampleRate,
-      pauseAfter,
-    });
-  }
-  return resolved;
-}
-
-/** Schedule the resolved clips back to back. Returns when the last one ends. */
-function scheduleClips(
-  ctx: AudioContext,
-  bank: PhraseBank,
-  clips: ResolvedClip[],
-  startAt: number,
-): number {
-  const output = ctx.createGain();
-  output.gain.value = 1;
-  output.connect(ctx.destination);
-
-  let cursor = startAt;
-  for (const { offset, duration, pauseAfter } of clips) {
-    const source = ctx.createBufferSource();
-    source.buffer = bank.buffer;
-    source.connect(output);
-    source.start(cursor, offset, duration);
-    source.stop(cursor + duration);
-    playingClips.push(source);
-    source.onended = () => {
-      source.disconnect();
-      playingClips = playingClips.filter((n) => n !== source);
-    };
-    cursor += duration + pauseAfter;
-  }
-  return cursor;
+  id: string;
 }
 
 /**
  * Speak a call the way it would sound over the air.
  *
- * With effects on this plays the recorded phrase bank — real audio that has
+ * This plays the recording of the call — one continuous utterance that has
  * been through the comms chain offline, which is the only way to get a
- * genuinely filtered voice in a browser. If the bank cannot be loaded or does
- * not cover the text, it falls back to the speech synthesiser so a call is
- * never silently dropped. With effects off it is always plain, clearly-spoken
- * synthesis, which is easier to learn the wording from.
+ * genuinely filtered voice in a browser. Radio effects add the transmit click,
+ * squelch and carrier hiss around it; with them off the same recording plays
+ * clean. Only if the recording cannot be played at all does the speech
+ * synthesiser stand in, so a call is never silently dropped.
  */
 export function transmit(call: SpokenCall): void {
   stopTransmission();
 
-  const ctx = effectsEnabled ? getContext() : null;
-  if (ctx) {
-    const mine = generation;
-    void loadBank(ctx).then((bank) => {
-      if (mine !== generation) return;
-      if (bank && playRecorded(ctx, bank, call)) return;
-      speakFallback(call.text);
-    });
+  const ctx = getContext();
+  if (!ctx) {
+    speakFallback(call.text);
     return;
   }
 
-  speakFallback(call.text);
+  const mine = generation;
+  void (async () => {
+    const bank = await loadBank();
+    if (mine !== generation) return;
+
+    const recording = bank ? await recordingFor(ctx, bank, call.id) : null;
+    if (mine !== generation) return;
+
+    if (recording) playRecorded(ctx, recording);
+    else speakFallback(call.text);
+  })();
 }
 
-/** The recorded path: clips through the offline-filtered bank, plus artefacts. */
-function playRecorded(ctx: AudioContext, bank: PhraseBank, call: SpokenCall): boolean {
-  // Resolve before making a sound, so a miss falls back cleanly.
-  const clips = resolveClips(bank, call);
-  if (!clips) return false;
-
+/** The recorded path: the call itself, with the radio around it. */
+function playRecorded(ctx: AudioContext, recording: AudioBuffer): void {
   const mine = generation;
   const start = ctx.currentTime;
-  pttClick(ctx, start);
-  squelch(ctx, start + 0.015, 0.07, 0.09);
 
-  // Let the click and opening squelch land before the voice starts.
-  const finishesAt = scheduleClips(ctx, bank, clips, start + 0.16);
+  // Without effects the recording plays on its own — same voice, no radio.
+  const voiceAt = effectsEnabled ? start + 0.16 : start;
+  if (effectsEnabled) {
+    pttClick(ctx, start);
+    squelch(ctx, start + 0.015, 0.07, 0.09);
+  }
+
+  const source = ctx.createBufferSource();
+  source.buffer = recording;
+  source.connect(ctx.destination);
+  source.start(voiceAt);
+  playingClips.push(source);
+  source.onended = () => {
+    source.disconnect();
+    playingClips = playingClips.filter((n) => n !== source);
+  };
+
+  if (!effectsEnabled) return;
 
   closeCarrier = openCarrier(ctx);
-
-  const remaining = Math.max(0, (finishesAt - ctx.currentTime) * 1000);
+  const remaining = Math.max(0, (voiceAt + recording.duration - ctx.currentTime) * 1000);
   window.setTimeout(() => {
     if (mine !== generation || !closeCarrier) return;
     closeCarrier();
@@ -376,8 +377,6 @@ function playRecorded(ctx: AudioContext, bank: PhraseBank, call: SpokenCall): bo
     squelch(ctx, end + 0.02, 0.13, 0.12);
     pttClick(ctx, end + 0.1, 0.04);
   }, remaining + 40);
-
-  return true;
 }
 
 /** The synthesiser path — unfiltered, but always available. */

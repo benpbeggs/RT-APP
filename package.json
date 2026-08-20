@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "build:audio": "vite-node scripts/build-phrase-bank.mjs",
+    "build:audio": "vite-node scripts/build-call-bank.mjs",
     "check:audio": "vite-node scripts/check-coverage.mjs",
     "check:voice": "python3 scripts/check-voice.py"
   },

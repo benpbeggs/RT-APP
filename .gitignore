@@ -11,7 +11,7 @@ node_modules
 dist
 
 # Scratch file handed from the phrase-bank driver to the Python renderer.
-src/assets/.clips.json
+src/assets/.calls.json
 dist-ssr
 *.local
 

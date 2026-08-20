@@ -2,95 +2,22 @@ import type { AerodromeType, PhaseId, PositionKind, ScenarioTemplate } from "../
 import { SCENARIOS } from "../data/phraseology";
 import type { SpokenCall } from "./radio";
 
-// Illustrative field names only — airspace classification changes, so the app
-// never asserts that a given aerodrome is towered today. See ACCURACY_DISCLAIMER.
-const AERODROMES: Record<AerodromeType, string[]> = {
-  ctaf: ["Cessnock", "Goulburn", "Temora", "Mangalore", "Warwick", "Latrobe Valley"],
-  controlled: ["Bankstown", "Moorabbin", "Archerfield", "Jandakot", "Parafield", "Camden"],
-};
+import { FLIGHTS_BY_TYPE, callId, type Flight } from "../data/flights";
 
-const AIRCRAFT_TYPES = ["Cessna 172", "Piper Warrior", "Diamond DA40", "Jabiru"];
-
-// Every value that can appear in a call is voiced by its own recorded clip, so
-// these are deliberately fixed, modest pools rather than open ranges: the
-// variety is what makes practice worthwhile, the exact spread is not.
-export const REGISTRATIONS = ["ABC", "DKM", "FQZ", "JTR", "PWL", "SYV"];
-const RUNWAYS = ["18", "25", "07", "36", "22", "04"];
-const WINDS = ["180 at 10", "250 at 8", "070 at 12", "360 at 6"];
-const COMPASS = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];
-const CIRCUIT_LEGS = ["crosswind", "downwind", "base"];
-const QNHS = ["1008", "1011", "1013", "1016", "1019", "1021", "1024"];
-const DISTANCES = ["2", "3", "5", "7", "8", "10", "12", "14"];
-const ALTITUDES = ["1500", "2500", "3500", "4500"];
-const ETA_MINUTES = ["3", "5", "8", "10", "12", "15"];
-const POBS = ["1", "2", "3"];
-
-/** Callsigns are type plus registration — "Cessna VH-ABC". */
-export function callsignFor(aircraftType: string, registration: string): string {
-  return `${aircraftType.split(" ")[0]} VH-${registration}`;
-}
-
-/** Every callsign the app can produce, for the phrase bank to render. */
-export const ALL_CALLSIGNS = AIRCRAFT_TYPES.flatMap((type) =>
-  REGISTRATIONS.map((reg) => callsignFor(type, reg)),
-);
-
-/** The full value space of each slot, shared with the phrase-bank build. */
-export const SLOT_VALUES: Record<string, string[]> = {
-  aerodrome: [...AERODROMES.ctaf, ...AERODROMES.controlled],
-  callsign: ALL_CALLSIGNS,
-  station: ["Traffic", "Tower"],
-  runway: RUNWAYS,
-  qnh: QNHS,
-  compass: COMPASS,
-  distanceNm: DISTANCES,
-  altitude: ALTITUDES,
-  circuitLeg: CIRCUIT_LEGS,
-  etaMin: ETA_MINUTES,
-  pob: POBS,
-};
+/**
+ * The values a call is about. One flight, fixed — every call is recorded whole
+ * for a specific flight, so these come from a set rather than being rolled at
+ * random. See src/data/flights.ts.
+ */
+export type GeneratedValues = Flight;
 
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-export interface GeneratedValues {
-  aerodromeType: AerodromeType;
-  callsign: string;
-  aircraftType: string;
-  aerodrome: string;
-  /** Who you're calling: "Traffic" on a CTAF, "Tower" at a controlled field. */
-  station: string;
-  runway: string;
-  wind: string;
-  qnh: string;
-  compass: string;
-  distanceNm: string;
-  altitude: string;
-  circuitLeg: string;
-  etaMin: string;
-  pob: string;
-}
-
-/** One consistent aircraft/aerodrome set, reused across a whole flight sequence. */
+/** One flight, reused across a whole sequence so it hangs together. */
 export function generateValues(aerodromeType: AerodromeType = "ctaf"): GeneratedValues {
-  const aircraftType = pick(AIRCRAFT_TYPES);
-  return {
-    aerodromeType,
-    callsign: callsignFor(aircraftType, pick(REGISTRATIONS)),
-    aircraftType,
-    aerodrome: pick(AERODROMES[aerodromeType]),
-    station: aerodromeType === "ctaf" ? "Traffic" : "Tower",
-    runway: pick(RUNWAYS),
-    wind: pick(WINDS),
-    qnh: pick(QNHS),
-    compass: pick(COMPASS),
-    distanceNm: pick(DISTANCES),
-    altitude: pick(ALTITUDES),
-    circuitLeg: pick(CIRCUIT_LEGS),
-    etaMin: pick(ETA_MINUTES),
-    pob: pick(POBS),
-  };
+  return pick(FLIGHTS_BY_TYPE[aerodromeType]);
 }
 
 export function fill(template: string, values: GeneratedValues): string {
@@ -279,11 +206,7 @@ export function renderScenario(
     modelCall,
     requiredElements: template.requiredElements.map((e) => fill(e, values)),
     position: resolvePosition(template, values),
-    call: {
-      text: modelCall,
-      template: template.modelCall,
-      values: values as unknown as Record<string, string>,
-    },
+    call: { text: modelCall, id: callId(template.id, values.id) },
   };
 }
 

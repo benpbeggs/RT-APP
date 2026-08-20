@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Check the phrase-bank voice sits in the gender-neutral pitch band.
+"""Check the call-bank voice sits in the gender-neutral pitch band.
 
 Perceived voice gender tracks fundamental frequency closely: typical male
 speech centres near 110 Hz, typical female near 210 Hz, and the ambiguous band
 between is roughly 155-190 Hz. This measures what the build voice actually
 produces so "neutral" is a number rather than an opinion.
 
-The voice model is multi-speaker, and the speaker in build-phrase-bank.py was
+The voice model is multi-speaker, and the speaker in build-call-bank.py was
 chosen with this measurement: sweeping every 14th of the 904 speakers, keeping
 those inside the band, then preferring the one whose pitch stays most
-consistent across tokens so the bank sounds like one person.
+consistent across utterances so the bank sounds like one person.
 
 Measured on raw synthesiser output, before processing — the bank is highpassed
 at 300 Hz, which strips the fundamental entirely (pitch still reads through the
@@ -31,7 +31,7 @@ import numpy as np
 
 def _load_build_script():
     """Share the build script's voice settings, despite its hyphenated name."""
-    path = Path(__file__).parent / "build-phrase-bank.py"
+    path = Path(__file__).parent / "build-call-bank.py"
     spec = importlib.util.spec_from_file_location("phrase_bank_build", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -42,7 +42,7 @@ bank = _load_build_script()
 
 NEUTRAL_LOW, NEUTRAL_HIGH = 155.0, 190.0
 
-# A spread of real bank tokens: place names, phonetics, digits and phrases.
+# A spread of words the calls actually use: place names, phonetics and digits.
 SAMPLE = [
     "bankstown", "traffic", "cessna", "victor", "downwind", "runway", "alpha",
     "niner", "cleared for takeoff", "radio check", "mayday", "holding point",
