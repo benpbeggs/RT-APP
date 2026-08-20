@@ -54,8 +54,28 @@ assembled at playback, the way automated aeronautical audio (ATIS and the like) 
   9,300 combinations of scenario and vocabulary and fails on any token the bank lacks. **Run it
   after touching any model call**, then rebuild the bank if it reports a gap.
 
-Regenerating the bank needs `espeak-ng` and `python3` with `numpy`; building or running the app
-does not — the generated sprite is committed.
+### The voice
+
+The bank is rendered in a gender-neutral voice, defined in `scripts/espeak/rt-neutral` and
+installed into espeak-ng by the build. None of espeak's shipped variants are neutral — the male
+ones measure 90–110 Hz and the female ones about 195 Hz, with nothing in between — so the variant
+sets its own pitch and, just as importantly, leaves the formants unscaled at 100%: perceived
+gender follows formant positions as much as pitch, and the shipped variants shift them either way.
+
+`npm run check:voice` measures it rather than trusting it, tracking fundamental frequency across a
+sample of real bank tokens and failing if the median leaves the 155–190 Hz androgynous band.
+Current median is **171 Hz**. Tune the `pitch` line in the variant if you want to move it.
+
+Two things to know if you re-tune: measure against **single tokens, not sentences**, because each
+clip is rendered alone and picks up espeak's utterance-final falling intonation — the same setting
+reads roughly 20 Hz higher on running prose. And measure **before** processing: the bank is
+highpassed at 300 Hz, which removes the fundamental outright. The pitch still reads correctly
+through the harmonics — the missing-fundamental effect, exactly as real radio and telephone audio
+behave — but it cannot be recovered from the processed file.
+
+Regenerating the bank needs `espeak-ng` and `python3` with `numpy`, and write access to espeak's
+data directory to install the voice variant; building or running the app needs none of that — the
+generated sprite is committed.
 
 If the bank cannot be loaded, or a call somehow needs a token it lacks, playback falls back to the
 speech synthesiser so a call is never silently dropped. The **Radio FX** toggle in the header

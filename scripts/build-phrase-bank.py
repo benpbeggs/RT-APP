@@ -26,19 +26,44 @@ import numpy as np
 SOURCE_RATE = 22050  # what espeak-ng emits
 TARGET_RATE = 8000  # plenty for a 2.9 kHz-limited signal, and halves the size
 
+# A gender-neutral voice — see scripts/espeak/rt-neutral for how it was chosen.
+VARIANT_NAME = "rt-neutral"
+VOICE = f"en+{VARIANT_NAME}"
+
 # The comms passband. Real VHF aeronautical audio is roughly 300-3000 Hz.
 HIGHPASS_HZ = 300.0
 LOWPASS_HZ = 2900.0
 
 
+def install_variant() -> None:
+    """Put the neutral voice variant where espeak-ng will find it."""
+    banner = subprocess.run(
+        ["espeak-ng", "--version"], check=True, capture_output=True, text=True
+    ).stdout
+    if "Data at: " not in banner:
+        raise SystemExit("could not locate espeak-ng data directory")
+    data_dir = Path(banner.split("Data at: ")[1].strip())
+
+    source = Path(__file__).parent / "espeak" / VARIANT_NAME
+    target = data_dir / "voices" / "!v" / VARIANT_NAME
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source.read_text())
+    except PermissionError:
+        raise SystemExit(
+            f"cannot write {target}\n"
+            f"Install the voice variant manually, then re-run:\n"
+            f"  sudo cp {source} {target}"
+        ) from None
+
+
 def synthesise(text: str, path: Path) -> None:
-    """espeak-ng at a controller's cadence: brisk, level, slightly low."""
+    """espeak-ng at a controller's cadence: brisk and level."""
     subprocess.run(
         [
             "espeak-ng",
-            "-v", "en-gb",
+            "-v", VOICE,
             "-s", "158",   # words per minute
-            "-p", "32",    # pitch, lower than default
             "-a", "170",   # amplitude
             "-g", "1",     # minimal word gap; spacing is handled at playback
             "-w", str(path),
@@ -141,6 +166,8 @@ def main() -> int:
     # a respelling to pronounce the token correctly.
     jobs = json.loads(tokens_path.read_text())
     tokens = [job[0] for job in jobs]
+
+    install_variant()
 
     clips: dict[str, np.ndarray] = {}
     with tempfile.TemporaryDirectory() as tmp:

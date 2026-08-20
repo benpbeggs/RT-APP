@@ -384,9 +384,11 @@ function speakFallback(text: string): void {
     return;
   }
 
-  // Controllers speak briskly, level and slightly low — not conversationally.
+  // Controllers speak briskly and level, not conversationally. Pitch is left
+  // at 1 so the platform voice is not pushed towards either gender — the
+  // recorded bank is deliberately neutral and this should match it.
   utterance.rate = 1.08;
-  utterance.pitch = 0.85;
+  utterance.pitch = 1;
 
   const ctx = getContext();
   if (!ctx) {

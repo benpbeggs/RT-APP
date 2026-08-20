@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "build:audio": "vite-node scripts/build-phrase-bank.mjs",
-    "check:audio": "vite-node scripts/check-coverage.mjs"
+    "check:audio": "vite-node scripts/check-coverage.mjs",
+    "check:voice": "python3 scripts/check-voice.py"
   },
   "dependencies": {
     "react": "^19.2.8",
