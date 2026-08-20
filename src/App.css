@@ -51,6 +51,25 @@ body {
   letter-spacing: 0.02em;
 }
 
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.audio-warning {
+  font-size: 0.75rem;
+  color: var(--amber);
+  border: 1px solid rgba(232, 178, 63, 0.45);
+  background: rgba(232, 178, 63, 0.1);
+  border-radius: 999px;
+  padding: 5px 12px;
+  max-width: 30ch;
+  line-height: 1.35;
+}
+
 .fx-toggle {
   display: inline-flex;
   align-items: center;

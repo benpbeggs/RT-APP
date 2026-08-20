@@ -1,17 +1,16 @@
-// Radio-comms colouring for spoken calls.
+// Playing a call over a simulated VHF radio.
 //
-// A VHF aeronautical transmission has a very recognisable signature: the click
-// of the transmit button, a burst of squelch noise as the carrier opens, a
-// voice squeezed into a narrow ~300-3000 Hz passband, a faint hiss underneath,
-// and a squelch tail when the carrier drops. We synthesise all of that with
-// Web Audio and lay it around the spoken call.
+// The voice itself is a recording — every call rendered whole ahead of time and
+// put through the comms chain offline, because the Web Speech API exposes no
+// audio node for synthesised speech and so a live voice cannot be filtered.
+// What is generated here is the radio around it: the click of the transmit
+// button, a burst of squelch as the carrier opens, a faint hiss underneath, and
+// a squelch tail when the carrier drops.
 //
-// One real limitation: the Web Speech API gives no audio node or media element
-// for synthesised speech, so the voice itself cannot be routed through a
-// biquad filter — only audio we generate ourselves can be. The voice is
-// instead shaped the way a controller actually speaks (clipped, level, a
-// little fast and low), and the filtered radio artefacts are layered around
-// it. That carries most of the effect.
+// The browser synthesiser remains as a fallback for when the recordings cannot
+// be played at all. It sounds markedly worse, so the UI says when it is in use
+// — a silent downgrade is indistinguishable from the recordings being bad, and
+// that is exactly how a blocked asset load once went unnoticed.
 
 import bankAudioUrl from "../assets/call-bank.bin?url";
 import bankIndexUrl from "../assets/call-bank.json?url";
@@ -234,19 +233,39 @@ interface CallBank {
 let bankPromise: Promise<CallBank | null> | null = null;
 const decoded = new Map<string, AudioBuffer>();
 
+/**
+ * Read a bundled asset.
+ *
+ * When the app is inlined into a single page the build rewrites asset URLs to
+ * `data:` URIs, and a strict Content-Security-Policy refuses `fetch()` on
+ * those — `connect-src` governs data: URIs too, so the request is blocked and
+ * the audio silently never loads. Decoding the URI directly avoids the request
+ * altogether; `fetch` is only for genuinely served files.
+ */
+async function loadAsset(url: string): Promise<ArrayBuffer> {
+  if (url.startsWith("data:")) {
+    const base64 = url.slice(url.indexOf(",") + 1);
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`asset ${url}: ${response.status}`);
+  return response.arrayBuffer();
+}
+
 function loadBank(): Promise<CallBank | null> {
   bankPromise ??= (async () => {
     try {
-      const [data, index] = await Promise.all([
-        fetch(bankAudioUrl).then((r) => {
-          if (!r.ok) throw new Error(`call bank audio: ${r.status}`);
-          return r.arrayBuffer();
-        }),
-        fetch(bankIndexUrl).then((r) => {
-          if (!r.ok) throw new Error(`call bank index: ${r.status}`);
-          return r.json() as Promise<{ calls: CallBank["calls"] }>;
-        }),
+      const [data, indexBytes] = await Promise.all([
+        loadAsset(bankAudioUrl),
+        loadAsset(bankIndexUrl),
       ]);
+      const index = JSON.parse(new TextDecoder().decode(indexBytes)) as {
+        calls: CallBank["calls"];
+      };
       return { data, calls: index.calls };
     } catch {
       // Any failure here just means we speak the call with the synthesiser.
@@ -326,6 +345,7 @@ export function transmit(call: SpokenCall): void {
 
   const ctx = getContext();
   if (!ctx) {
+    setAudioSource("synthesised");
     speakFallback(call.text);
     return;
   }
@@ -338,8 +358,13 @@ export function transmit(call: SpokenCall): void {
     const recording = bank ? await recordingFor(ctx, bank, call.id) : null;
     if (mine !== generation) return;
 
-    if (recording) playRecorded(ctx, recording);
-    else speakFallback(call.text);
+    if (recording) {
+      setAudioSource("recorded");
+      playRecorded(ctx, recording);
+    } else {
+      setAudioSource("synthesised");
+      speakFallback(call.text);
+    }
   })();
 }
 
@@ -377,6 +402,29 @@ function playRecorded(ctx: AudioContext, recording: AudioBuffer): void {
     squelch(ctx, end + 0.02, 0.13, 0.12);
     pttClick(ctx, end + 0.1, 0.04);
   }, remaining + 40);
+}
+
+// ------------------------------------------------------------- audio status
+//
+// The synthesiser fallback is a much worse voice, and when it engages silently
+// there is no way to tell it apart from the recordings simply sounding bad —
+// which is exactly how a blocked asset load went unnoticed. The UI says so.
+
+export type AudioSource = "recorded" | "synthesised";
+
+let audioSource: AudioSource = "recorded";
+const statusListeners = new Set<(source: AudioSource) => void>();
+
+export function subscribeAudioSource(listener: (source: AudioSource) => void): () => void {
+  statusListeners.add(listener);
+  listener(audioSource);
+  return () => statusListeners.delete(listener);
+}
+
+function setAudioSource(source: AudioSource): void {
+  if (audioSource === source) return;
+  audioSource = source;
+  for (const listener of statusListeners) listener(source);
 }
 
 /** The synthesiser path — unfiltered, but always available. */

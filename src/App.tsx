@@ -1,15 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 import { ReferenceMode } from "./components/ReferenceMode";
 import { TrainerMode } from "./components/TrainerMode";
 import { SourcesPanel } from "./components/SourcesPanel";
-import { radioEffectsEnabled, setRadioEffects, stopTransmission } from "./lib/radio";
+import {
+  radioEffectsEnabled,
+  setRadioEffects,
+  stopTransmission,
+  subscribeAudioSource,
+  type AudioSource,
+} from "./lib/radio";
 
 type Tab = "trainer" | "reference" | "sources";
 
 function App() {
   const [tab, setTab] = useState<Tab>("trainer");
   const [radioFx, setRadioFx] = useState(radioEffectsEnabled);
+  const [audioSource, setAudioSource] = useState<AudioSource>("recorded");
+
+  useEffect(() => subscribeAudioSource(setAudioSource), []);
 
   function toggleRadioFx() {
     const next = !radioFx;
@@ -25,20 +34,27 @@ function App() {
           <h1>RT Trainer</h1>
           <p className="tagline">Australian radiotelephony practice for VFR pilots</p>
         </div>
-        <button
-          type="button"
-          className={`fx-toggle ${radioFx ? "on" : ""}`}
-          onClick={toggleRadioFx}
-          aria-pressed={radioFx}
-          title={
-            radioFx
-              ? "Playback sounds like a VHF transmission. Switch off for clearer audio."
-              : "Playback is clear speech. Switch on for radio noise and squelch."
-          }
-        >
-          <span className="fx-dot" aria-hidden="true" />
-          Radio FX {radioFx ? "on" : "off"}
-        </button>
+        <div className="header-controls">
+          {audioSource === "synthesised" && (
+            <span className="audio-warning" role="status">
+              Recorded audio unavailable — using this browser's voice
+            </span>
+          )}
+          <button
+            type="button"
+            className={`fx-toggle ${radioFx ? "on" : ""}`}
+            onClick={toggleRadioFx}
+            aria-pressed={radioFx}
+            title={
+              radioFx
+                ? "Playback sounds like a VHF transmission. Switch off for clearer audio."
+                : "Playback is clear speech. Switch on for radio noise and squelch."
+            }
+          >
+            <span className="fx-dot" aria-hidden="true" />
+            Radio FX {radioFx ? "on" : "off"}
+          </button>
+        </div>
       </header>
 
       <nav className="tabs">
