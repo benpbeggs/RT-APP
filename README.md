@@ -20,9 +20,9 @@ flight a towered one. Both give a complete sequence — 18 calls on a CTAF, 19 c
   taxi → departure → en route → inbound → circuit → landing, with emergency and general phrases
   as separate non-sequential groups. Each scenario shows a plan-view diagram of where the aircraft
   is when the call is made, and you answer either by typing or by pressing **Transmit** and
-  speaking. The answer is checked element by element and the model call revealed with
-  a recording of the model call. One flight is used throughout, so the sequence hangs together;
-  **New flight** moves to another.
+  speaking. The answer is checked element by element, and the model call is revealed with a
+  recording of it. One flight is used throughout, so the sequence hangs together; **New flight**
+  moves to another.
 - **Reference** — every call grouped by phase of flight, in the same order, each with its diagram.
 - **Sources & Accuracy** — what the phrase library is based on and its limitations.
 
@@ -71,13 +71,18 @@ multi-speaker LibriTTS model. A formant synthesiser (espeak and friends) sounds 
 robotic no matter how it is filtered afterwards; a model trained on real speech does not.
 
 Being multi-speaker also makes the voice choosable, so it is picked by measurement rather than by
-ear. `npm run check:voice --sweep` walks the model's 904 speakers, keeps those whose median
-fundamental falls in the **155–190 Hz** androgynous band — between typical male (~110 Hz) and
-typical female (~210 Hz) — and prefers the one holding the tightest spread. That selected
-**speaker 224**, median **174 Hz**. Plain `npm run check:voice` re-checks the current pick.
+ear. `npm run check:voice -- --sweep` walks the model's 904 speakers, keeps those whose median
+fundamental falls in the target range, and prefers the one holding the tightest spread across
+utterances, so the calls sound like one controller rather than several.
 
-Measure **before** processing if you re-pick: the bank is highpassed at 300 Hz, which removes the
-fundamental outright. The pitch still reads through the harmonics — the missing-fundamental
+The voice is male: the target is **95–145 Hz**, where typical male speech centres near 120 Hz
+(typical female is near 210 Hz, with an ambiguous band around 155–190 Hz between). That selected
+**speaker 392**, median **120 Hz** and a spread of only 118–125 Hz across whole calls. Plain
+`npm run check:voice` re-checks the current pick and fails if it drifts out of range. Change
+`TARGET_LOW`/`TARGET_HIGH` in `scripts/check-voice.py` and re-sweep to move it.
+
+Measure on whole calls, not isolated words, and **before** processing: the bank is highpassed at
+300 Hz, which removes the fundamental outright. The pitch still reads through the harmonics — the missing-fundamental
 effect, exactly as real radio and telephone audio behave — but it cannot be recovered from the
 processed file.
 

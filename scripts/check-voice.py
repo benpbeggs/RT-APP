@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Check the call-bank voice sits in the gender-neutral pitch band.
+"""Check the call-bank voice sits in the intended pitch range.
 
 Perceived voice gender tracks fundamental frequency closely: typical male
-speech centres near 110 Hz, typical female near 210 Hz, and the ambiguous band
-between is roughly 155-190 Hz. This measures what the build voice actually
-produces so "neutral" is a number rather than an opinion.
+speech centres near 120 Hz and typical female near 210 Hz, with an ambiguous
+band around 155-190 Hz between them. This measures what the build voice
+actually produces, so the choice is a number rather than an opinion.
 
 The voice model is multi-speaker, and the speaker in build-call-bank.py was
-chosen with this measurement: sweeping every 14th of the 904 speakers, keeping
-those inside the band, then preferring the one whose pitch stays most
-consistent across utterances so the bank sounds like one person.
+chosen with this measurement: sweeping the 904 speakers, keeping those inside
+the target range, then preferring the one whose pitch stays most consistent
+across utterances so the bank sounds like one controller.
 
 Measured on raw synthesiser output, before processing — the bank is highpassed
 at 300 Hz, which strips the fundamental entirely (pitch still reads through the
@@ -40,13 +40,17 @@ def _load_build_script():
 
 bank = _load_build_script()
 
-NEUTRAL_LOW, NEUTRAL_HIGH = 155.0, 190.0
+# The voice is meant to read as male.
+TARGET_LABEL = "male"
+TARGET_LOW, TARGET_HIGH = 95.0, 145.0
 
-# A spread of words the calls actually use: place names, phonetics and digits.
+# Real calls, since the bank records whole utterances — pitch measured on an
+# isolated word sits differently from pitch measured across a sentence.
 SAMPLE = [
-    "bankstown", "traffic", "cessna", "victor", "downwind", "runway", "alpha",
-    "niner", "cleared for takeoff", "radio check", "mayday", "holding point",
-    "two", "final", "qnh",
+    "Bankstown Tower, Cessna victor hotel alpha bravo charlie, downwind, touch and go",
+    "Cessnock Traffic, Piper victor hotel delta kilo mike, taxiing runway one seven, Cessnock",
+    "Temora Traffic, Jabiru victor hotel foxtrot quebec zulu, final, runway three six, full stop, Temora",
+    "Runway two niner, cleared for takeoff, Cessna victor hotel delta kilo mike",
 ]
 
 
@@ -90,10 +94,10 @@ def speak(voice, text: str, speaker: int) -> tuple[np.ndarray, int]:
     return x, rate
 
 
-def token_pitches(voice, speaker: int) -> list[float]:
+def call_pitches(voice, speaker: int) -> list[float]:
     values = []
-    for token in SAMPLE:
-        x, rate = speak(voice, token, speaker)
+    for call in SAMPLE:
+        x, rate = speak(voice, call, speaker)
         track = f0_track(x, rate)
         if len(track):
             values.append(float(np.median(track)))
@@ -102,15 +106,15 @@ def token_pitches(voice, speaker: int) -> list[float]:
 
 def sweep(voice) -> int:
     """Re-run the speaker search across the model's speakers."""
-    print("Sweeping speakers (every 14th)…\n")
+    print("Sweeping speakers (every 8th)…\n")
     best = []
-    for speaker in range(0, 904, 14):
-        values = token_pitches(voice, speaker)
+    for speaker in range(0, 904, 8):
+        values = call_pitches(voice, speaker)
         if len(values) < len(SAMPLE) // 2:
             continue
         median = float(np.median(values))
         spread = max(values) - min(values)
-        if NEUTRAL_LOW <= median <= NEUTRAL_HIGH:
+        if TARGET_LOW <= median <= TARGET_HIGH:
             best.append((spread, median, speaker))
             print(f"  speaker {speaker:4}  median {median:6.1f} Hz  spread {spread:5.1f}")
     best.sort()
@@ -126,25 +130,25 @@ def main() -> int:
     if "--sweep" in sys.argv:
         return sweep(voice)
 
-    values = token_pitches(voice, bank.SPEAKER_ID)
-    for token, f0 in zip(SAMPLE, values):
-        print(f"  {token:22} {f0:6.1f} Hz")
+    values = call_pitches(voice, bank.SPEAKER_ID)
+    for call, f0 in zip(SAMPLE, values):
+        print(f"  {f0:6.1f} Hz   {call[:62]}…")
 
     if not values:
         print("no voiced frames measured")
         return 1
 
     median = float(np.median(values))
-    print(f"\nspeaker {bank.SPEAKER_ID}, median F0 across {len(values)} tokens: {median:.1f} Hz")
-    print(f"gender-neutral band:                        {NEUTRAL_LOW:.0f}-{NEUTRAL_HIGH:.0f} Hz")
-    print(f"spread across tokens:                       {min(values):.1f}-{max(values):.1f} Hz")
+    print(f"\nspeaker {bank.SPEAKER_ID}, median F0 across {len(values)} calls: {median:.1f} Hz")
+    print(f"target {TARGET_LABEL} range:                          {TARGET_LOW:.0f}-{TARGET_HIGH:.0f} Hz")
+    print(f"spread across calls:                        {min(values):.1f}-{max(values):.1f} Hz")
 
-    if not NEUTRAL_LOW <= median <= NEUTRAL_HIGH:
-        side = "male" if median < NEUTRAL_LOW else "female"
-        print(f"\nFAIL — reads as {side}. Re-run with --sweep to pick another speaker.")
+    if not TARGET_LOW <= median <= TARGET_HIGH:
+        side = "lower" if median < TARGET_LOW else "higher"
+        print(f"\nFAIL — {side} than the {TARGET_LABEL} range. Re-run with --sweep to pick another speaker.")
         return 1
 
-    print("\nOK — voice sits in the gender-neutral band.")
+    print(f"\nOK — voice sits in the {TARGET_LABEL} range.")
     return 0
 
 

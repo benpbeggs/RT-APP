@@ -50,10 +50,11 @@ VOICE_URL = (
 VOICE_FILE = "en-us-libritts-high.onnx"
 CACHE_DIR = Path(__file__).parent.parent / ".cache" / "piper"
 
-# Speaker 224 of 904, picked by measuring every 14th speaker: its pitch sits at
-# the centre of the gender-neutral band (median 174 Hz) and holds the tightest
-# spread across utterances. See check-voice.py.
-SPEAKER_ID = 224
+# Speaker 392 of 904, picked by measuring the model's speakers on real calls:
+# its pitch sits at the centre of the male range (median 121 Hz) and holds the
+# tightest spread across utterances, so the calls sound like one controller.
+# See check-voice.py.
+SPEAKER_ID = 392
 
 # Slightly quicker than conversational, the way controllers actually speak.
 LENGTH_SCALE = 0.95
