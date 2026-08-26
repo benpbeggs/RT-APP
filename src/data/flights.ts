@@ -247,3 +247,13 @@ export const FLIGHTS_BY_TYPE: Record<AerodromeType, Flight[]> = {
 
 /** Identifies one recorded call: this scenario, spoken for this flight. */
 export const callId = (scenarioId: string, flightId: string) => `${scenarioId}|${flightId}`;
+
+/**
+ * The callsign as it appears in a radio call: "Piper VH-DKM" -> "Piper DKM".
+ *
+ * VH- is the Australian nationality prefix. It belongs to the registration —
+ * which is why the scenario briefing still names the aircraft in full — but it
+ * is not part of the callsign on the air, so a written call should not carry
+ * it either.
+ */
+export const radioCallsign = (callsign: string) => callsign.replace(" VH-", " ");

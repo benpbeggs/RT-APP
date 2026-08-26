@@ -2,7 +2,7 @@ import type { AerodromeType, PhaseId, PositionKind, ScenarioTemplate } from "../
 import { SCENARIOS } from "../data/phraseology";
 import type { SpokenCall } from "./radio";
 
-import { FLIGHTS_BY_TYPE, callId, type Flight } from "../data/flights";
+import { FLIGHTS_BY_TYPE, callId, radioCallsign, type Flight } from "../data/flights";
 
 /**
  * The values a call is about. One flight, fixed — every call is recorded whole
@@ -214,13 +214,18 @@ export function renderScenario(
   template: ScenarioTemplate,
   values: GeneratedValues = generateValues(),
 ): RenderedScenario {
-  const modelCall = fill(template.modelCall, values);
+  // The briefing names the aircraft in full ("You are Piper VH-DKM"), because
+  // that is its registration; the call itself uses the radio form, without the
+  // nationality prefix, because that is what goes over the air.
+  const onAir = { ...values, callsign: radioCallsign(values.callsign) };
+
+  const modelCall = fill(template.modelCall, onAir);
   return {
     template,
     values,
     situation: fill(template.situation, values),
     modelCall,
-    requiredElements: template.requiredElements.map((e) => fill(e, values)),
+    requiredElements: template.requiredElements.map((e) => fill(e, onAir)),
     position: resolvePosition(template, values),
     call: { text: modelCall, id: callId(template.id, values.id) },
   };
