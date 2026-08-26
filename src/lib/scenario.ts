@@ -128,8 +128,24 @@ function foldDigitRuns(tokens: string[]): string[] {
 }
 
 /**
+ * Drop the VH- nationality prefix, which is written but not spoken.
+ *
+ * "VH-ABC" tokenises to ["vh", "abc"], and a trainee who says the prefix
+ * anyway gives a phonetic run that folds to "vhabc". Removing it either way
+ * means the written callsign and both spoken forms all land on "abc".
+ */
+function dropNationalityPrefix(tokens: string[]): string[] {
+  return tokens
+    .filter((token) => token !== "vh")
+    .map((token) => {
+      const withPrefix = /^vh([a-z]{2,4})$/.exec(token);
+      return withPrefix ? withPrefix[1] : token;
+    });
+}
+
+/**
  * Reduce text to a comparable form. Whitespace is dropped entirely at the end
- * so "VH-ABC" and "victor hotel alpha bravo charlie" converge on "vhabc".
+ * so "VH-ABC" and "alpha bravo charlie" converge on "abc".
  */
 export function canonicalize(text: string): string {
   const tokens = text
@@ -139,7 +155,7 @@ export function canonicalize(text: string): string {
     .split(/\s+/)
     .filter(Boolean);
 
-  return foldDigitRuns(foldPhonetics(foldNumberWords(tokens))).join("");
+  return dropNationalityPrefix(foldDigitRuns(foldPhonetics(foldNumberWords(tokens)))).join("");
 }
 
 export interface ElementResult {

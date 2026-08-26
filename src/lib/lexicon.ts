@@ -40,9 +40,15 @@ const digits = (raw: string) => raw.split("").map((d) => DIGIT_WORDS[Number(d)])
 export function spokenValue(slot: string, value: string): string {
   switch (slot) {
     case "callsign": {
-      // "Cessna VH-ABC" -> "Cessna victor hotel alpha bravo charlie"
+      // "Cessna VH-ABC" -> "Cessna alpha bravo charlie".
+      //
+      // VH- is the Australian nationality prefix. It is written but not
+      // spoken: on the air the callsign is the type and the last three
+      // letters, so saying "victor hotel" as well is wrong.
       const [type, registration] = value.split(" VH-");
-      const letters = ["v", "h", ...registration.toLowerCase().split("")]
+      const letters = registration
+        .toLowerCase()
+        .split("")
         .map((c) => PHONETIC_ALPHABET[c])
         .join(" ");
       return `${type} ${letters}`;

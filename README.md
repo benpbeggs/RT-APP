@@ -94,9 +94,14 @@ recording either way — it does not fall back to a different voice.
 Answering out loud uses the browser's SpeechRecognition API (Chrome, Edge, and Safari; Firefox
 does not implement it). Because speech comes back as it is *spoken* rather than as it is
 *written*, answers are normalised before scoring — `src/lib/scenario.ts` folds phonetic-alphabet
-runs into letters ("victor hotel alpha bravo charlie" → `VH-ABC`), aviation digit words into
-numbers ("one eight" → `18`), and spoken altitudes into figures ("two thousand five hundred" →
-`2500`), so a spoken answer scores the same as a typed one.
+runs into letters ("alpha bravo charlie" → `ABC`), aviation digit words into numbers ("one eight"
+→ `18`), and spoken altitudes into figures ("two thousand five hundred" → `2500`), so a spoken
+answer scores the same as a typed one.
+
+It also drops the **VH-** nationality prefix, which is written but not spoken: on the air a
+callsign is the type and the last three letters — "Jabiru Juliett Tango Romeo", not "Jabiru Victor
+Hotel Juliett Tango Romeo". The written form, the spoken form and the prefix said anyway all match
+the same answer.
 
 The microphone needs a secure context (`https://` or `localhost`) and, in an embedded page, a
 `microphone` permission policy — if it is blocked the app says so and you can type instead.
