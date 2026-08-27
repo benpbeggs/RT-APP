@@ -32,6 +32,33 @@ export const PRONUNCIATIONS: Record<string, string> = {
 
 const digits = (raw: string) => raw.split("").map((d) => DIGIT_WORDS[Number(d)]).join(" ");
 
+const capitalise = (word: string) => word[0].toUpperCase() + word.slice(1);
+
+/**
+ * A callsign as it goes over the air: "Piper VH-SYV" -> "Piper Sierra Yankee
+ * Victor".
+ *
+ * Two things happen here. The VH- nationality prefix is dropped: it belongs to
+ * the registration — which is why the scenario briefing still names the
+ * aircraft in full — but not to the callsign on the air. And the registration
+ * is spelled out phonetically, because that is what is said, and a written
+ * radio call should read as it is spoken.
+ */
+export function radioCallsign(callsign: string): string {
+  const [type, registration] = callsign.split(" VH-");
+  if (registration === undefined) return callsign;
+
+  const letters = registration
+    .toLowerCase()
+    .split("")
+    .map((c) => PHONETIC_ALPHABET[c])
+    .filter(Boolean)
+    .map(capitalise)
+    .join(" ");
+
+  return `${type} ${letters}`;
+}
+
 /**
  * How a value is said. Levels group into magnitudes the way a pilot reads them
  * ("two thousand five hundred"); runways, QNH and distances go digit by digit,
@@ -39,20 +66,9 @@ const digits = (raw: string) => raw.split("").map((d) => DIGIT_WORDS[Number(d)])
  */
 export function spokenValue(slot: string, value: string): string {
   switch (slot) {
-    case "callsign": {
-      // "Cessna VH-ABC" -> "Cessna alpha bravo charlie".
-      //
-      // VH- is the Australian nationality prefix. It is written but not
-      // spoken: on the air the callsign is the type and the last three
-      // letters, so saying "victor hotel" as well is wrong.
-      const [type, registration] = value.split(" VH-");
-      const letters = registration
-        .toLowerCase()
-        .split("")
-        .map((c) => PHONETIC_ALPHABET[c])
-        .join(" ");
-      return `${type} ${letters}`;
-    }
+    // A callsign reads the same way it is said, so both come from one place.
+    case "callsign":
+      return radioCallsign(value);
     case "altitude": {
       const n = Number(value);
       const thousands = Math.floor(n / 1000);
